@@ -198,7 +198,6 @@ class Protocol:
                     self.to_display('info', str(sender) + ' acknowledged RREP.')
                     self.waited_for.append((4, sender, Tbyte(0)))
                 elif msg_type == 5:  # SEND-TEXT-REQUEST
-                    # TODO Dont forget RERR in callback
                     self.__handle_s_t_r(sender, msg_str)
                 elif msg_type == 6:  # SEND-HOP-ACK
                     msg_id = content[1]
@@ -374,6 +373,7 @@ class Protocol:
         try:
             # if a SEND-HOP-ACK from 'address' was received, no need to send S-T-R again
             found_ack = next(i for i in self.waited_for if i == (6, next_hop, text_req.msg_id))
+            # TODO: search for RERRs as well??
             self.waited_for.remove(found_ack)
         except StopIteration:
             # else send S-T-R again, if there are repeats left
@@ -384,6 +384,7 @@ class Protocol:
                 # send RERR to precursors AND delete buffered messages to dest_addr
                 self.__declare_next_hop_unreachable(next_hop)
                 self.buffered_text_requests = [x for x in self.buffered_text_requests if x[0] != text_req.dest_addr]
+                # TODO: declare messages lost (maybe concat to one method with RERR-Handling
             else:
                 # send message
                 self.msg_out(text_req.to_bytestring(), next_hop)
@@ -660,8 +661,9 @@ class Protocol:
         # deconstruct message-array items (message's content) as Tbytes
         # -----------------------
         try:
-            msg_type, msg_uflag, msg_hop_count, msg_rreq_id, msg_origin_addr, \
-            msg_origin_seq_num, msg_dest_addr, msg_dest_seq_num = [Tbyte(x) for x in msg_arr]
+            # msg_type, msg_uflag, msg_hop_count, msg_rreq_id, msg_origin_addr, \
+            #     msg_origin_seq_num, msg_dest_addr, msg_dest_seq_num = [Tbyte(x) for x in msg_arr]
+            msg_rreq = RREQ(*[Tbyte(x) for x in msg_arr[1:]])
         except ValueError:
             raise ProtocolError('Message header has too few arguments (Type RREQ)')
 
@@ -692,7 +694,7 @@ class Protocol:
         # -----------------------
 
         # create key to find already processed RREQs (avoid loops)
-        msg_key = msg_origin_addr.address_string() + str(msg_rreq_id)
+        msg_key = msg_rreq.origin_addr.address_string() + str(msg_rreq.rreq_id)
         ignore_until = self.processed_messages.get(msg_key)
 
         # ignore this rreq for (another) PATH_DISCOVERY_TIME seconds
@@ -707,22 +709,22 @@ class Protocol:
         # create or update route table entry to originator (reverse route)
         # (AODV: 6.5 2nd paragraph (without ++hop_count))
         # -----------------------
-        route_to_origin = self.routes.get(msg_origin_addr.address_string())
+        route_to_origin = self.routes.get(msg_rreq.origin_addr.address_string())
 
         if route_to_origin:
-            if msg_uflag == 0 and msg_dest_seq_num > route_to_origin.dest_sequence_num:
-                route_to_origin.dest_sequence_num = msg_origin_seq_num
+            if msg_rreq.u_flag == 0 and msg_rreq.dest_seq_num > route_to_origin.dest_sequence_num:
+                route_to_origin.dest_sequence_num = msg_rreq.origin_seq_num
             route_to_origin.is_route_valid = True
-            route_to_origin.hops = msg_hop_count
+            route_to_origin.hops = msg_rreq.hop_count
             route_to_origin.next_hop = prev_node
             route_to_origin.expiry_time = time.time() + DEFAULT_LIFETIME
         else:
-            self.routes[msg_origin_addr.address_string()] = RouteTableEntry(
+            self.routes[msg_rreq.origin_addr.address_string()] = RouteTableEntry(
                 destination_addr=prev_node,
-                dest_sequence_num=msg_origin_seq_num,
+                dest_sequence_num=msg_rreq.origin_seq_num,
                 is_dest_seq_valid=True,
                 is_route_valid=True,
-                hops=msg_hop_count,
+                hops=msg_rreq.hop_count,
                 next_hop=prev_node,
                 precursors=set(),
                 lifetime=time.time() + DEFAULT_LIFETIME
@@ -734,13 +736,13 @@ class Protocol:
 
         # if i am the destination, answer with RREP
         # -----------------------
-        if msg_dest_addr.address_string() == self.address:
+        if msg_rreq.dest_addr.address_string() == self.address:
             # increase my_seq_num if msg_seq_num is equal to it (AODV: 6.6.1)
-            max(self.sequence_number, msg_dest_seq_num)
+            max(self.sequence_number, msg_rreq.dest_seq_num)
 
             origin_rrep = self.construct_rrep(
                 hop_count=Tbyte(0),
-                origin_addr=msg_origin_addr,
+                origin_addr=msg_rreq.origin_addr,
                 dest_addr=Tbyte(int(self.address)),
                 dest_seq_num=self.sequence_number,
                 lifetime=Tbyte(DEFAULT_LIFETIME)
@@ -749,9 +751,9 @@ class Protocol:
 
         # if i know a valid route to destination, answer with that route
         # -----------------------
-        route_to_dest = self.routes.get(msg_dest_addr.address_string())
+        route_to_dest = self.routes.get(msg_rreq.dest_addr.address_string())
         # evaluate whether to send route information about destination (AODV: 6.6.(ii))
-        is_no_stale_route = route_to_dest.dest_sequence_num >= msg_dest_seq_num
+        is_no_stale_route = route_to_dest.dest_sequence_num >= msg_rreq.dest_seq_num
         if route_to_dest and route_to_dest.is_valid_and_alive() \
                 and route_to_dest.is_dest_seq_valid and is_no_stale_route:
             # update precursors of forward route (AODV: 6.6.2 (2nd paragraph, 1st sentence))
@@ -761,8 +763,8 @@ class Protocol:
 
             inter_rrep = self.construct_rrep(
                 hop_count=route_to_dest.hops,
-                origin_addr=msg_origin_addr,
-                dest_addr=msg_dest_addr,
+                origin_addr=msg_rreq.origin_addr,
+                dest_addr=msg_rreq.dest_addr,
                 dest_seq_num=route_to_dest.dest_sequence_num,
                 lifetime=Tbyte(int(route_to_dest.expiry_time - time.time()))
             )
@@ -774,22 +776,14 @@ class Protocol:
         # if i have an (invalid) route to destination, update sequence number if mine is greater than rreq's
         # AODV: 6.5 2nd to last paragraph, 2nd to last sentence
         if route_to_dest:
-            msg_dest_seq_num = max(msg_dest_seq_num, route_to_dest.dest_sequence_num)
+            msg_rreq.dest_seq_num = max(msg_rreq.dest_seq_num, route_to_dest.dest_sequence_num)
 
         # update RREQ to forward (AODV: 6.5 (second to last paragraph))
-        fwd_rreq = self.construct_rreq(
-            hop_count=msg_hop_count.increase(),
-            rreq_id=msg_rreq_id,
-            origin_addr=msg_origin_addr,
-            origin_seq_num=msg_origin_seq_num,
-            dest_addr=msg_dest_addr,
-            dest_seq_num=msg_dest_seq_num
-        )
+        msg_rreq.hop_count.increase()
 
         # broadcast forwarded RREQ
-        self.msg_out(fwd_rreq, 'FFFF')
+        self.msg_out(msg_rreq, 'FFFF')
 
-    # waits for RREP TODO: increase RREQ ID
     def __send_rreq_repeated(self, rreq: RREQ, repeats: int):
         try:
             # if any RREP for 'destination-addr' was received, no need to send RREQ again
@@ -805,7 +799,7 @@ class Protocol:
                                 ' with ' + str(repeats) + ' repetitions.')
 
                 # increase rreq_id and send new rreq
-                self.msg_out(rreq.increase_rreq_id(), 'FFFF')
+                self.msg_out(rreq.increase_rreq_id().to_bytestring(), 'FFFF')
 
                 # schedule next call
                 self.timed_tasks.append((
@@ -819,17 +813,20 @@ class Protocol:
         route_to_dest = self.routes.get(dest_addr.address_string())
 
         # send RREQ (AODV: 6.3)
-        dest_seq_num = None \
-            if route_to_dest is None or route_to_dest.is_dest_seq_valid is False \
-            else route_to_dest.dest_sequence_num
+        dest_seq_num = Tbyte(0)
+        u_flag = Tbyte(1)
+        if route_to_dest and route_to_dest.is_dest_seq_valid:
+            dest_seq_num = route_to_dest.dest_sequence_num
+            u_flag = Tbyte(0)
 
         rreq = RREQ(
+            u_flag=u_flag,
             hop_count=Tbyte(0),
-            rreq_id=self.rreq_id.increase().copy(),
+            rreq_id=self.rreq_id.increase().copy(),  # copy to not get updated in repetitions
             origin_addr=Tbyte(int(self.address)),
-            origin_seq_num=self.sequence_number.increase(),
+            origin_seq_num=self.sequence_number.increase().copy(),  # copy to not get updated in repetitions
             dest_addr=dest_addr,
-            dest_seq_num=dest_seq_num
+            dest_seq_num=dest_seq_num  # No problem if updated
         )
 
         # send RREQ 3 times or until RREP received TODO: add callback if repeat == 0?

@@ -41,4 +41,5 @@ from HelperClasses import Tbyte
 #         print(one.signed(), zero.signed())
 # print(bytes('hallo'.encode('ascii')))
 
-msg_type, msg_dest_count = [Tbyte(x) for x in [1, 2, 4, 5][:1]]
+bla = [x for x in [1, 2, 4, 5][1:]]
+print(bla)

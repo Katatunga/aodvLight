@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import struct
 import threading
+from typing import Optional
 
 
 class Tbyte:
@@ -71,28 +72,26 @@ class Tbyte:
 
 
 class RREQ:
-    def __init__(self, hop_count: Tbyte, rreq_id: Tbyte, origin_addr: Tbyte,
+    def __init__(self, u_flag: Tbyte, hop_count: Tbyte, rreq_id: Tbyte, origin_addr: Tbyte,
                  origin_seq_num: Tbyte, dest_addr: Tbyte, dest_seq_num: Tbyte):
         self.msg_type = Tbyte(1)
-        self.u_flag = Tbyte(0)
-        if dest_seq_num is None:
-            u_flag = Tbyte(1)
-            dest_seq_num = Tbyte(0)
+
+        self.u_flag = u_flag
+        self.dest_seq_num = dest_seq_num
         self.hop_count = hop_count
         self.rreq_id = rreq_id
         self.origin_addr = origin_addr
         self.origin_seq_num = origin_seq_num
         self.dest_addr = dest_addr
-        self.dest_seq_num = dest_seq_num
-        
+
     def increase_rreq_id(self):
         self.rreq_id.increase()
         return self
-    
+
     def to_bytestring(self):
         bs = b''
         attributes = [self.msg_type, self.u_flag, self.hop_count, self.rreq_id, self.origin_addr,
-                 self.origin_seq_num, self.dest_addr, self.dest_seq_num]
+                      self.origin_seq_num, self.dest_addr, self.dest_seq_num]
         for attr in attributes:
             bs += attr.byte_string()
 
