@@ -93,17 +93,27 @@ def _tbytes_to_byte_str(arr: list[Tbyte]):
 class Protocol:
     def __init__(self, address: str, msg_in: queue.Queue[bytes], msg_out: callable, to_display: callable):
         # from parameters
+        # ----------------
+        # address of this module
         self.address = address
+        # queue to get incoming messages from (processed in protocol_loop())
         self.msg_in = msg_in
+        # function to send messages (expect args: msg, address)
         self.msg_out = msg_out
+        # function to display messages and other communication (like errors or info)
         self.to_display = to_display
 
         # initialized here
+        # ----------------
+        # sequence number of this module
         self.sequence_number = Tbyte(0)
+        # msg_id for s-t-r's to identify on ACK
         self.msg_id = Tbyte(255)
+        # route table
         self.routes: Dict[str, RouteTableEntry] = {}
-        # self.reverse_routes = {}
+        # already processed messages (RREQs only atm)
         self.processed_messages: Dict[str, float] = {}
+        # current RREQ_id to identify each resend of same RREQ
         self.rreq_id = Tbyte(0)
         # stores tasks to do at a certain time as tuples of (time, cmd: str, callback_func: callable, [args]
         self.timed_tasks: list[TimedTask] = []
@@ -149,7 +159,7 @@ class Protocol:
             # Destructure and confirm integrity of message
             # -----------------------
 
-            # destructuring - will raise ValueError(not enough values to unpack...) if too few arguments
+            # destructure incoming message
             try:
                 lr: bytes
                 sender: bytes
@@ -160,10 +170,12 @@ class Protocol:
                 self.to_display('error', 'Incoming message had too few separators, discarded')
                 continue
 
+            # make sure it was a message
             if not lr == b'LR':
                 self.to_display('error', 'Incoming message did not start with "LR", discarded')
                 continue
 
+            # make sure the message is complete
             if not int(content_length, 16) == len(content):
                 self.to_display('info', 'Incoming message is incomplete, discarded')
                 continue
@@ -177,22 +189,29 @@ class Protocol:
                 msg_type = Tbyte(content[0]).unsigned()
                 if msg_type == 1:  # RREQ
                     self.__handle_rreq(sender, list(content))
+
                 elif msg_type == 2:  # RREP
                     self.msg_out(self.construct_rrep_ack(), sender)
                     self.__handle_rrep(sender, list(content))
+
                 elif msg_type == 3:  # RERR
                     self.__handle_rerr(sender, list(content))
+
                 elif msg_type == 4:  # RREP-ACK
                     self.to_display('info', str(sender) + ' acknowledged RREP.')
                     self.waited_for.append((4, sender, Tbyte(0)))
+
                 elif msg_type == 5:  # SEND-TEXT-REQUEST
                     self.__handle_s_t_r(sender, content)
+
                 elif msg_type == 6:  # SEND-HOP-ACK
                     msg_id = Tbyte(content[1])
                     self.to_display('info', str(sender) + ' sent SEND-HOP-ACK for message: ' + str(msg_id.unsigned()))
                     self.waited_for.append((6, sender, msg_id))
+
                 elif msg_type == 7:  # SEND-TEXT-REQUEST-ACK
                     self.__handle_s_t_r_ack(list(content))
+
                 else:
                     self.to_display('info', 'Malformed message, discarded (Type unknown')
             except ProtocolError as e:
@@ -726,7 +745,7 @@ class Protocol:
         # if i am the destination, answer with RREP
         # -----------------------
         if msg_rreq.dest_addr.address_string() == self.address:
-            # increase my_seq_num if msg_seq_num is equal to it (AODV: 6.6.1)
+            # increase my_seq_num if msg_seq_num is equal to it (AODV: 6.6.1) TODO: unsure about this part
             max(self.sequence_number, msg_rreq.dest_seq_num)
 
             origin_rrep = self.construct_rrep(
