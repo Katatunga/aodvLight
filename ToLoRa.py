@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Union
+from typing import Union, Optional
 
 import serial
 import _thread
 import queue
+import RPi.GPIO as GPIO
 
 from LoRaUI import LoRaUI
 # from Protocol import Protocol
 
 # often used strings
+from Protocol import Protocol
 
 AT_OK = b'AT,OK'
 LINEBREAK = b'\r\n'
@@ -53,10 +55,21 @@ class IncomingMessage:
 
 # write to cmd_out queue to send a message (AT+SEND)
 # TODO: Only for testing; needs to use protocol
-def send_message(msg: bytes, address: bytes):
+def send_message(msg: bytes, address: Union[bytes, str]):
+    # if address was passed as a string, encode it as ascii
+    if isinstance(address, str):
+        if address.isascii():
+            address.encode('ascii')
+        else:
+            win.write_error('Address (' + address + ') was not ASCII-encoded, discarded.')
+            return
+
+    # define callback for when the message was sent TODO: may be impractical
     def print_msg_sent(answer):
         if answer == 'AT,SENDED':
             win.write_to_messages(str(msg), str(address), True)
+
+    # queue commands in order, so that there is no interruption by other threads
     send_cmds = list()
     send_cmds.append(CmdAndAnswers(b'AT+DEST=' + address, AT_OK))
     send_cmds.append(CmdAndAnswers(b'AT+SEND=' + bytes(len(msg)), AT_OK))
@@ -64,8 +77,13 @@ def send_message(msg: bytes, address: bytes):
     to_out_queue(send_cmds)
 
 
-# write (multiple) commands to cmd_out queue (synchronized)
+
 def to_out_queue(cmds_and_answers: list[CmdAndAnswers]):
+    """
+    Writes (multiple) commands to cmd_out queue (synchronized)
+    :param cmds_and_answers: commands to write to uart and answers to expect
+    :type cmds_and_answers: CmdAndAnswers
+    """
     # synchronize (for sequential puts)
     with lock:
         for elem in cmds_and_answers:
@@ -74,7 +92,7 @@ def to_out_queue(cmds_and_answers: list[CmdAndAnswers]):
 
 
 def write_msg_out_loop():
-    """ write the commands in cmd_out queue to uart and wait for and handle the answers in cmd_in """
+    """ write the commands in cmd_out queue to uart, then wait for and handle the answers in cmd_in """
     while 1:
         # get next command and expected answer(s) (as instance of CmdAndAnswers)
         cmd_and_answers = cmd_out.get(True)
@@ -109,22 +127,59 @@ def write_msg_out_loop():
                     cmd_and_answers.callback(answer)
 
             except queue.Empty:
-                handle_errors('Got no answer to command "' + str(cmd_and_answers.cmd.rstrip(LINEBREAK)) + '"')
+                handle_errors(b'Got no answer to command "' + bytes(cmd_and_answers.cmd.rstrip(LINEBREAK)) + b'"')
 
         # wait a little to avoid CPU_busy error TODO: TEST: may not be needed since we waited for answer
         time.sleep(wait_secs_to_next_cmd)
 
 
-# Option 1 (no extra-thread)
-def handle_incoming_msg(msg):
-    # translate incoming message string to object
-    msg = IncomingMessage(msg)
-    # write incoming messages to respective output
-    win.write_to_messages(msg.content, msg.sender)
+def display_protocol(cmd: str, msg: str, address: Optional[str] = None):
+    """
+    Protocol machine for communication from aodv-protocol to GUI. The 'msg' is displayed according
+    to the 'cmd'. However, if the 'cmd' is 'msg-lost', 'msg' should only consist of the display_id,
+    which identifies the lost message.\n
+    :param cmd: what type of message is msg: (msg-lost, msg-sent, info, debug, error, msg)
+    :type cmd: str
+    :param msg: message to display or display_id of lost message
+    :type msg: str
+    :param address: optional parameter that has to be given when cmd is 'msg' and contains the address
+        of the sender
+    :type address: str
+    """
+    if cmd == 'msg-lost':
+        # TODO: declare message lost
+        # for now: print as message
+        win.write_to_messages('Message lost: ', msg[:5], True)
+    if cmd == 'msg-sent':
+        # TODO: declare message sent
+        # for now: print as message
+        win.write_to_messages('Message sent: ', msg[:5], True)
+    if cmd == 'info':
+        win.write_info(msg)
+    if cmd == 'debug':
+        win.write_to_logs(msg)
+    if cmd == 'error':
+        win.write_error(msg)
+    if cmd == 'msg':
+        win.write_to_messages(msg, address, False)
 
 
-def handle_errors(err_msg):
-    win.write_error(err_msg)
+def handle_errors(err_msg: bytes):
+    if err_msg == b'ERR: CPU_BUSY':
+        win.write_error('Got: "' + err_msg.decode('ascii') + '". Reset module.')
+        reset_module()
+    else:
+        win.write_error(err_msg.decode('ascii'))
+
+
+def reset_module():
+    print("resetting lora modul...")
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(18, GPIO.OUT)
+    GPIO.output(18, GPIO.HIGH)
+    time.sleep(1)
+    GPIO.output(18, GPIO.LOW)
+    GPIO.cleanup()
 
 
 def read_uart_to_protocol_loop():
@@ -177,38 +232,41 @@ def do_setup():
     to_out_queue(setup_cmd_list)
 
 
-# setup uart
-ser = serial.Serial(
-    port='/dev/ttyS0',
-    baudrate=115200,
-    parity=serial.PARITY_NONE,
-    stopbits=serial.STOPBITS_ONE,
-    bytesize=serial.EIGHTBITS
-)
-# make sure uart is open
-if not ser.is_open:
-    ser.open()
+if __name__ == '__main__':
 
-win = LoRaUI(send_message, None, "Testing Tkinter UI")
-#protocol = Protocol(ADDRESS)
+    # setup uart
+    ser = serial.Serial(
+        port='/dev/ttyS0',
+        baudrate=115200,
+        parity=serial.PARITY_NONE,
+        stopbits=serial.STOPBITS_ONE,
+        bytesize=serial.EIGHTBITS
+    )
+    # make sure uart is open
+    if not ser.is_open:
+        ser.open()
 
-# lock to use for synchronized sequential job-queueing
-lock = threading.RLock()
+    # create GUI
+    win = LoRaUI(send_message, None, "Testing Tkinter UI")
 
-# schedule setup in cmd_out queue
-do_setup()
+    # create protocol-machine
+    protocol = Protocol(
+        address=ADDRESS.decode('ascii'),
+        msg_in=msg_in,
+        msg_out=send_message,
+        to_display=display_protocol
+    )
 
-# start worker threads TODO: use lock as argument?
-_thread.start_new_thread(read_uart_to_protocol_loop, ())
-_thread.start_new_thread(write_msg_out_loop, ())
+    # lock to use for synchronized sequential job-queueing
+    lock = threading.RLock()
 
-win.mainloop()
+    # schedule setup in cmd_out queue
+    do_setup()
 
-#print("resetting lora modul...")
-#import RPi.GPIO as GPIO
-#GPIO.setmode(GPIO.BCM)
-#GPIO.setup(18, GPIO.OUT)
-#GPIO.output(18, GPIO.HIGH)
-#sleep(1)
-#GPIO.output(18, GPIO.LOW)
-#GPIO.cleanup()
+    # start loop threads TODO: use lock as argument?
+    _thread.start_new_thread(read_uart_to_protocol_loop, ())
+    _thread.start_new_thread(write_msg_out_loop, ())
+    _thread.start_new_thread(protocol.protocol_loop, ())
+
+    # catch main thread in GUI-Loop, so program ends when window closes
+    win.mainloop()
