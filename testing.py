@@ -1,6 +1,7 @@
 import queue
 import struct
 import sys
+import time
 
 from HelperClasses import Tbyte
 
@@ -40,6 +41,20 @@ from HelperClasses import Tbyte
 #     if one.increase() > zero.increase() and not one.signed() > zero.signed():
 #         print(one.signed(), zero.signed())
 # print(bytes('hallo'.encode('ascii')))
+from Protocol import RouteTableEntry
 
-bla = [x for x in [1, 2, 4, 5][1:]]
+obj = {}
+obj['hallo'] = RouteTableEntry(
+    destination_addr='0001',
+    dest_sequence_num=Tbyte(0),
+    is_route_valid=True,
+    is_dest_seq_valid=True,
+    hops=Tbyte(10),
+    next_hop='0005',
+    precursors=set(),
+    lifetime=1
+)
+
+bla = [str(x) for x in obj.values()]
 print(bla)
+

@@ -68,7 +68,7 @@ class Tbyte:
             return self
 
     def copy(self):
-        return Tbyte(self)
+        return Tbyte(self.unsigned())
 
 
 class RREQ:
@@ -99,12 +99,13 @@ class RREQ:
 
 
 class SendTextRequest:
-    def __init__(self, origin_addr: Tbyte, dest_addr: Tbyte, msg_id: Tbyte, payload: bytes):
+    def __init__(self, origin_addr: Tbyte, dest_addr: Tbyte, msg_id: Tbyte, payload: bytes, display_id: str):
         self.msg_type = 5
         self.origin_addr = origin_addr
         self.dest_addr = dest_addr
         self.msg_id = msg_id
         self.payload = payload
+        self.display_id = display_id
 
     def to_bytestring(self):
         bs = b''
