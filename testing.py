@@ -30,31 +30,49 @@ from HelperClasses import Tbyte
 # x = ":".join("{:02x}".format(ord(c)) for c in op[::2])
 # print(msg_str.hex(':'))
 # print([b'%c' % i for i in msg_str])
-# zero = Tbyte(0)
+# currently = Tbyte(0)
 # one = Tbyte(1)
 #
 # AT_OK = b'AT,OK'
 # AT_OK = (AT_OK,) if not hasattr(AT_OK, '__iter__') else AT_OK
 
-# # prof that <> works for Tbytes
-# for i in range(0, 256):
-#     if one.increase() > zero.increase() and not one.signed() > zero.signed():
-#         print(one.signed(), zero.signed())
+# prof that <> works for Tbytes
+
+# currently = Tbyte(1)
+# incoming = Tbyte(0)
+#
+# for i in range(0, 512):
+#     incoming.increase()
+#     currently.increase()
+#     if currently > incoming:
+#         print('incoming stale')
+
 # print(bytes('hallo'.encode('ascii')))
-from Protocol import RouteTableEntry
 
-obj = {}
-obj['hallo'] = RouteTableEntry(
-    destination_addr='0001',
-    dest_sequence_num=Tbyte(0),
-    is_route_valid=True,
-    is_dest_seq_valid=True,
-    hops=Tbyte(10),
-    next_hop='0005',
-    precursors=set(),
-    lifetime=1
-)
+# from Protocol import RouteTableEntry
+#
+# obj = {}
+# obj['hallo'] = RouteTableEntry(
+#     destination_addr='0001',
+#     dest_sequence_num=Tbyte(0),
+#     is_route_valid=True,
+#     is_dest_seq_valid=True,
+#     hops=Tbyte(10),
+#     next_hop='0005',
+#     precursors=set(),
+#     lifetime=1
+# )
+#
+# bla = [str(x) for x in obj.values()]
+# print(bla)
 
-bla = [str(x) for x in obj.values()]
-print(bla)
+# state = 'Pending'
+# first_line_str = '\n' + ('-' * 10) + state + ('-' * (10 - 1))
+# msg = '\n----------------Hallpo----------------\nOla\n----------------------------------------\n'
+# end_of_first_line = msg.index('\n', 1)
+# msg = first_line_str + msg[end_of_first_line:]
+# print(msg)
 
+sender: bytes = 'hello'.encode('ascii')
+sender: str = sender.decode('ascii')
+print(sender)
