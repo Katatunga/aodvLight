@@ -18,28 +18,24 @@ class Tbyte:
         else:
             raise TypeError('Value is not a byte-string or byte-valued number')
 
-    # TODO: ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    # TODO: GROESSER KLEINER STIMMT SO NICHT
-    # TODO: ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
     def __eq__(self, other: Tbyte):
         return self.num_rep == other.num_rep
 
     def __gt__(self, other: Tbyte):
         """Uses signed representation of bytes to evaluate which is greater"""
-        return (self.signed() - other.signed()) & 0xff > 0
+        return Tbyte((self.signed() - other.signed()) & 0xff).signed() > 0
 
     def __lt__(self, other: Tbyte):
         """Uses signed representation of bytes to evaluate which is lesser"""
-        return (self.signed() - other.signed()) & 0xff < 0
+        return Tbyte((self.signed() - other.signed()) & 0xff).signed() < 0
 
     def __ge__(self, other: Tbyte):
         """Uses signed representation of bytes to evaluate which is greater"""
-        return (self.signed() - other.signed()) & 0xff >= 0
+        return self > other or self == other
 
     def __le__(self, other: Tbyte):
         """Uses signed representation of bytes to evaluate which is lesser"""
-        return (self.signed() - other.signed()) & 0xff <= 0
+        return self < other or self == other
 
     def __ne__(self, other: Tbyte):
         return self.num_rep != other.num_rep
