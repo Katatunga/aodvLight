@@ -4,6 +4,9 @@ from tkinter import *
 import tkinter.scrolledtext
 
 
+SEPERATOR = ('-' * 36)
+
+
 class LoRaUI:
 
     def get_scrolled_text(self, fg):
@@ -116,15 +119,30 @@ class LoRaUI:
 
         align = 'right' if not is_out else 'left'
 
-        s = '\n-----------------------------------\n' + \
+        s = '\n' + SEPERATOR + '\n' + \
             sender_str + '\n' + \
             msg + \
-            '\n-----------------------------------\n'
+            '\n' + SEPERATOR + '\n'
         self.chats[int_address].append((s, align))
         # there are no in_msgs from FFFF, but that chat should be used to display all incoming messages
         if not is_out:
             self.chats[0].append((s, align))
         self.update_messages()
+
+    def update_message_state(self, address: str, index: int, state: str):
+        # calculate amount of '-' left of state
+        half_length_floored = int((len(SEPERATOR) - len(state)) / 2)
+        # generate new first line
+        first_line_str = '\n' + ('-' * half_length_floored) + state + ('-' * (len(SEPERATOR) - half_length_floored))
+        # get correct chat
+        int_address = int(address)
+        chat = self.chats[int_address]
+        # extract message from chat
+        msg = chat[index][0]
+        # get position of second '\n'
+        end_of_first_line = msg.index('\n', 1)
+        # replace first line with new first line
+        chat[index] = (first_line_str + msg[end_of_first_line:], chat[index][1])
 
     def write_to_logs(self, log: str, is_out: bool = False):
         cmd_or_ans_str = 'Command:' if is_out else 'Answer:'
