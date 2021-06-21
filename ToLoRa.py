@@ -77,7 +77,6 @@ def send_message(msg: bytes, address: Union[bytes, str]):
     to_out_queue(send_cmds)
 
 
-
 def to_out_queue(cmds_and_answers: list[CmdAndAnswers]):
     """
     Writes (multiple) commands to cmd_out queue (synchronized)
@@ -133,12 +132,12 @@ def write_msg_out_loop():
         time.sleep(wait_secs_to_next_cmd)
 
 
-def display_protocol(cmd: str, msg: str, address: Optional[str] = None):
+def display_protocol(cmd: str, msg: Union[str, int], address: Optional[str] = None):
     """
     Protocol machine for communication from aodv-protocol to GUI. The 'msg' is displayed according
-    to the 'cmd'. However, if the 'cmd' is 'msg-lost', 'msg' should only consist of the display_id,
-    which identifies the lost message.\n
-    :param cmd: what type of message is msg: (msg-lost, msg-sent, info, debug, error, msg)
+    to the 'cmd'. However, if the 'cmd' is ['msg-lost','msg-sent','msg-ack'], 'msg' should only consist of the
+    display_id, which identifies the message to update the state on.\n
+    :param cmd: what type of message is msg: (msg-lost, msg-sent, msg_ack, info, debug, error, msg)
     :type cmd: str
     :param msg: message to display or display_id of lost message
     :type msg: str
@@ -147,13 +146,17 @@ def display_protocol(cmd: str, msg: str, address: Optional[str] = None):
     :type address: str
     """
     if cmd == 'msg-lost':
-        # TODO: declare message lost
-        # for now: print as message
-        win.write_to_messages('Message lost: ', msg[:5], True)
+        # update the state of the message as LOST
+        if address:
+            win.update_message_state(address, msg, 'LOST')
     if cmd == 'msg-sent':
-        # TODO: declare message sent
-        # for now: print as message
-        win.write_to_messages('Message sent: ', msg[:5], True)
+        # update the state of the message as SENT
+        if address:
+            win.update_message_state(address, msg, 'SENT')
+    elif cmd == 'msg-ack':
+        # update the state of the message as ACKNOWLEDGED
+        if address:
+            win.update_message_state(address, msg, 'ACKNOWLEDGED')
     if cmd == 'info':
         win.write_info(msg)
     if cmd == 'debug':
@@ -162,6 +165,20 @@ def display_protocol(cmd: str, msg: str, address: Optional[str] = None):
         win.write_error(msg)
     if cmd == 'msg':
         win.write_to_messages(msg, address, False)
+
+
+def send_via_protocol(msg: str, address: str):
+    display_id = win.write_to_messages(msg, address, True)
+    if msg.isascii():
+        protocol.send_s_t_r(
+            dest_addr=address,
+            payload=msg.encode('ascii'),
+            display_id=display_id
+        )
+    else:
+        win.update_message_state(address, display_id, 'ERROR: Non-ascii')
+        win.write_error('Message (' + msg + ') was not ASCII-encoded, discarded.')
+        return
 
 
 def handle_errors(err_msg: bytes):
@@ -246,9 +263,6 @@ if __name__ == '__main__':
     if not ser.is_open:
         ser.open()
 
-    # create GUI
-    win = LoRaUI(send_message, None, "Testing Tkinter UI")
-
     # create protocol-machine
     protocol = Protocol(
         address=ADDRESS.decode('ascii'),
@@ -256,6 +270,9 @@ if __name__ == '__main__':
         msg_out=send_message,
         to_display=display_protocol
     )
+
+    # create GUI
+    win = LoRaUI(send_via_protocol, None, "Testing Tkinter UI")
 
     # lock to use for synchronized sequential job-queueing
     lock = threading.RLock()
