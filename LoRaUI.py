@@ -89,7 +89,7 @@ class LoRaUI:
         def callback_if_textentry(callback):
             s = text_entry.get()
             if s != '':
-                callback(bytes(s.encode('ascii')), self.dd_option.get())  # TODO? no error message on non ascii
+                callback(s, self.dd_option.get())  # TODO? no error message on non ascii
 
         Button(self.window, text='SEND', command=lambda: callback_if_textentry(on_send)) \
             .grid(row=2, column=4, sticky='nesw')
@@ -112,7 +112,11 @@ class LoRaUI:
         self.messages.configure(state='disabled')
         self.messages.yview_moveto(1)
 
-    def write_to_messages(self, msg: str, address: str, is_out: bool = False):
+    def write_to_messages(self, msg: str, address: str, is_out: bool = False) -> int:
+        """
+        Writes message to chat of 'address', aligned left if 'is_out' is True, otherwise aligned right.
+        Returns the index of this message as an int.\n
+        """
         sender_str = 'From ' + address + ':' if not is_out else 'I wrote:'
 
         int_address = 0 if address == 'FFFF' else int(address)
@@ -123,11 +127,14 @@ class LoRaUI:
             sender_str + '\n' + \
             msg + \
             '\n' + SEPERATOR + '\n'
+
+        index = len(self.chats[int_address])
         self.chats[int_address].append((s, align))
         # there are no in_msgs from FFFF, but that chat should be used to display all incoming messages
         if not is_out:
             self.chats[0].append((s, align))
         self.update_messages()
+        return index
 
     def update_message_state(self, address: str, index: int, state: str):
         # calculate amount of '-' left of state
@@ -143,6 +150,7 @@ class LoRaUI:
         end_of_first_line = msg.index('\n', 1)
         # replace first line with new first line
         chat[index] = (first_line_str + msg[end_of_first_line:], chat[index][1])
+        self.update_messages()
 
     def write_to_logs(self, log: str, is_out: bool = False):
         cmd_or_ans_str = 'Command:' if is_out else 'Answer:'
