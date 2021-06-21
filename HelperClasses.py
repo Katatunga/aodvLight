@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import struct
 import threading
-from typing import Optional
+import time
+from typing import Optional, Union
 
 
 class Tbyte:
@@ -95,7 +96,7 @@ class RREQ:
 
 
 class SendTextRequest:
-    def __init__(self, origin_addr: Tbyte, dest_addr: Tbyte, msg_id: Tbyte, payload: bytes, display_id: str):
+    def __init__(self, origin_addr: Tbyte, dest_addr: Tbyte, msg_id: Tbyte, payload: bytes, display_id: int):
         self.msg_type = 5
         self.origin_addr = origin_addr
         self.dest_addr = dest_addr
@@ -110,3 +111,63 @@ class SendTextRequest:
             bs += attr.byte_string()
 
         return bs
+
+
+class ProtocolError(Exception):
+    def __init__(self, message: str):
+        self.message = message
+
+
+class RouteTableEntry:
+    def __init__(self,
+                 destination_addr: str, dest_sequence_num: Tbyte, is_dest_seq_valid: bool,
+                 is_route_valid: bool, hops: Tbyte, next_hop: str, precursors: set[str], lifetime: float):
+        self.destination_addr = destination_addr
+        self.dest_sequence_num = dest_sequence_num
+        self.is_dest_seq_valid = is_dest_seq_valid
+        self.is_route_valid = is_route_valid
+        self.hops = hops
+        self.next_hop = next_hop
+        self.precursors = precursors
+        self.expiry_time = lifetime
+
+    def __str__(self) -> str:
+        return \
+            'dest_addr: ' + self.destination_addr + \
+            '; dest_seq_num: ' + str(self.dest_sequence_num.unsigned()) + \
+            '; is_dest_seq_valid: ' + str(self.is_dest_seq_valid) + \
+            '; is_route_valid: ' + str(self.is_route_valid) + \
+            '; hops: ' + str(self.hops.unsigned()) + \
+            '; next_hop: ' + self.next_hop + \
+            '; precursors: ' + str(self.precursors) + \
+            '; expiry_time: ' + str(self.expiry_time)
+
+    def is_valid_and_alive(self):
+        """
+        Checks if this route is valid and not expired.
+        :return: True if the route is valid and it's lifetime is not expired, False otherwise.\n
+        """
+        return self.is_route_valid and self.expiry_time > time.time()
+
+    def to_delete(self):
+        """
+        Returns True if this route is invalid and its delete period is expired.\n
+        :return: True if the route is invalid and it's lifetime (delete period) is expired, False otherwise
+        """
+        return self.is_route_valid is False and self.expiry_time < time.time()
+
+    def invalidate(self, delete_period: Union[float, int]):
+        """Invalidates this route and sets its expiry_time to time.time() + DELETE_PERIOD"""
+        self.is_route_valid = False
+        self.expiry_time = time.time() + delete_period
+
+
+class TimedTask:
+    def __init__(self, time_to_call: float, task_type: str, callback: callable, args: list):
+        self.time_to_call = time_to_call
+        self.task_type = task_type
+        self.callback = callback
+        self.args = args
+
+    def is_due(self) -> bool:
+        return self.time_to_call < time.time()
