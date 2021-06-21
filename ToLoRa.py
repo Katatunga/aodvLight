@@ -58,7 +58,7 @@ def send_message(msg: bytes, address: Union[bytes, str]):
     # if address was passed as a string, encode it as ascii
     if isinstance(address, str):
         if address.isascii():
-            address.encode('ascii')
+            address = address.encode('ascii')
         else:
             win.write_error('Address (' + address + ') was not ASCII-encoded, discarded.')
             return
@@ -71,7 +71,7 @@ def send_message(msg: bytes, address: Union[bytes, str]):
     # queue commands in order, so that there is no interruption by other threads
     send_cmds = list()
     send_cmds.append(CmdAndAnswers(b'AT+DEST=' + address, AT_OK))
-    send_cmds.append(CmdAndAnswers(b'AT+SEND=' + bytes(len(msg)), AT_OK))
+    send_cmds.append(CmdAndAnswers(b'AT+SEND=' + str(len(msg)).encode('ascii'), AT_OK))
     send_cmds.append(CmdAndAnswers(msg, (b'AT,SENDING', b'AT,SENDED'), print_msg_sent))
     to_out_queue(send_cmds)
 
@@ -117,8 +117,8 @@ def write_msg_out_loop():
 
                 # if actual answer is not the expected answer (should not happen), raise error
                 if elem is not None and answer != elem:
-                    raise ValueError('"' + str(cmd_and_answers.cmd) + '" was not answered with "' +
-                                     str(elem) + '", but instead with "' + str(answer) + '"')
+                    handle_errors(b'"' + cmd_and_answers.cmd + b'" was not answered with "' +
+                                  elem + b'", but instead with "' + answer + b'"')
 
                 # if cmd_and_answers contains a callback, call it with the actual answer
                 if cmd_and_answers.callback:
@@ -148,6 +148,10 @@ def display_protocol(cmd: str, msg: Union[str, int], address: Optional[str] = No
         # update the state of the message as LOST
         if address:
             win.update_message_state(address, msg, 'LOST')
+    if cmd == 'msg-pending':
+        # update the state of the message as PENDING
+        if address:
+            win.update_message_state(address, msg, 'PENDING')
     if cmd == 'msg-sent':
         # update the state of the message as SENT
         if address:
@@ -211,16 +215,17 @@ def read_uart_to_protocol_loop():
         # remove LINEBREAK
         msg = msg.rstrip(LINEBREAK)
 
-        # handle actual messages from outside
+        # handle actual messages from outside TODO: on incomplete messages somehow everything after is incomplete
         if msg.startswith(b'LR'):
             # if message incomplete, read rest
             msg_arr = msg.split(b',', 3)
-            expected_length = int(msg_arr[2], 16)
+            # TODO Incoming message is incomplete, discarded - Ignored message: b',0009,08,\x01\x01\x00\x01\t\x01\x06\x00
+            expected_length = int(msg_arr[2].decode('ascii'), base=16)
             if len(msg_arr[3]) < expected_length:
                 # reattach LINEBREAK which apparently was part of message
                 msg += LINEBREAK
-                # read remaining bytes of content
-                msg += ser.read(expected_length - len(msg_arr[3]))
+                # read remaining bytes of content (minus the LINEBREAK in message)
+                msg += ser.read(expected_length - 2 - len(msg_arr[3]))
                 # remove following LINEBREAK from input
                 ser.read(2)
             # handle_incoming_msg(msg)
@@ -230,11 +235,11 @@ def read_uart_to_protocol_loop():
         elif msg.startswith(b'AT'):
             cmd_in.put(msg)
         # handle possible errors
-        elif msg.startswith(b'ERR'):
+        elif msg.startswith(b'AT,ERR') or msg.startswith(b'ERR'):
             handle_errors(msg)
         # log everything else
         else:
-            win.write_to_logs('Ignored message: ' + msg.decode('ascii'))
+            win.write_to_logs('Ignored message: ' + str(msg))
 
 
 def do_setup():
@@ -248,7 +253,8 @@ def do_setup():
     # Reset module
     setup_cmd_list.append(CmdAndAnswers(b'AT+RST', AT_OK))
     # Set config string
-    setup_cmd_list.append(CmdAndAnswers(b'AT+CFG=433000000,20,9,12,4,1,0,0,0,0,3000,8,4', AT_OK))  # AT+CFG=433000000,5,9,7,4,1,0,0,0,0,3000,8,10
+    setup_cmd_list.append(CmdAndAnswers(b'AT+CFG=433000000,20,9,12,4,1,0,0,0,0,3000,8,4',
+                                        AT_OK))  # AT+CFG=433000000,5,9,7,4,1,0,0,0,0,3000,8,10
     # Set address
     setup_cmd_list.append(CmdAndAnswers(b'AT+ADDR=0004', AT_OK))
     # Activate modules receive mode

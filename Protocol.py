@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import _thread
 import queue
 import random
@@ -140,6 +142,10 @@ class Protocol:
                 self.to_display('debug', 'Exited blocking on queue to do tasks')
                 continue
 
+            # if there were outside threads registering timed tasks, they will send this command
+            if msg_str == b'do_tasks':
+                continue
+
             # -----------------------
             # Destructure and confirm integrity of message
             # -----------------------
@@ -161,7 +167,7 @@ class Protocol:
                 continue
 
             # make sure the message is complete
-            if not int(content_length, 16) == len(content):
+            if not int(content_length.decode('ascii'), base=16) == len(content):
                 self.to_display('info', 'Incoming message is incomplete, discarded')
                 continue
 
@@ -248,7 +254,7 @@ class Protocol:
             str_ack = _tbytes_to_byte_str([Tbyte(7), msg_origin_addr, msg_dest_addr, msg_id])
             self.msg_out(str_ack, prev_node)
             # display message
-            self.to_display('msg', payload, msg_origin_addr)
+            self.to_display('msg', payload, msg_origin_addr.address_string())
             return
 
         # --------------------------
@@ -296,11 +302,16 @@ class Protocol:
             self.buffered_text_requests.append(text_req)
             # send RREQ (AODV: 6.3)
             self.__originate_rreq_to(text_req.dest_addr)
+            # display message as pending
+            self.to_display('msg-pending', display_id, dest_addr)
         # --------------------------
         # Active route
         # --------------------------
         else:
             self.__do_send_s_t_r(text_req)
+
+        # since this is a function used by other threads, get protocol_loop-thread out of blocking on msg_in.get()
+        self.msg_in.put(b'do_tasks')
 
     def __do_send_s_t_r(self, text_req: SendTextRequest):
         # add callback on timeout for STR-ACK
@@ -314,7 +325,7 @@ class Protocol:
             text_req=text_req,
             repeats=S_T_R_REPEAT
         )
-        self.to_display('msg-sent', text_req.display_id, text_req.dest_addr)
+        self.to_display('msg-sent', text_req.display_id, text_req.dest_addr.address_string())
 
     def __max_out_lifetimes(self, *dests: str):
         for dest in dests:
@@ -393,7 +404,7 @@ class Protocol:
                 'info',
                 f'Message {msg_id.unsigned()} has not been acknowledged by destination {dest_addr.address_string()}'
             )
-            self.to_display('msg-lost', display_id, dest_addr)
+            self.to_display('msg-lost', display_id, dest_addr.address_string())
 
     # waits for SEND-HOP-ACK
     def __send_s_t_r_repeated(self, text_req: SendTextRequest, repeats: int):
@@ -749,7 +760,7 @@ class Protocol:
         route_to_origin = self.routes.get(msg_rreq.origin_addr.address_string())
 
         if route_to_origin:
-            if msg_rreq.u_flag == 0 and msg_rreq.dest_seq_num > route_to_origin.dest_sequence_num:
+            if msg_rreq.u_flag.unsigned() == 0 and msg_rreq.dest_seq_num > route_to_origin.dest_sequence_num:
                 route_to_origin.dest_sequence_num = msg_rreq.origin_seq_num
             route_to_origin.is_route_valid = True
             route_to_origin.hops = msg_rreq.hop_count
