@@ -54,7 +54,6 @@ class IncomingMessage:
 
 
 # write to cmd_out queue to send a message (AT+SEND)
-# TODO: Only for testing; needs to use protocol
 def send_message(msg: bytes, address: Union[bytes, str]):
     # if address was passed as a string, encode it as ascii
     if isinstance(address, str):
@@ -205,7 +204,7 @@ def read_uart_to_protocol_loop():
         msg = b''
         # block until there is something received
         msg += ser.read()
-        # block to read until LINEBREAK
+        # block to read until LINEBREAK TODO can naturally be sent if LR, read until content_length
         while not msg.endswith(LINEBREAK):
             msg += ser.read()
 
@@ -214,8 +213,19 @@ def read_uart_to_protocol_loop():
 
         # handle actual messages from outside
         if msg.startswith(b'LR'):
+            # if message incomplete, read rest
+            msg_arr = msg.split(b',', 3)
+            expected_length = int(msg_arr[2], 16)
+            if len(msg_arr[3]) < expected_length:
+                # reattach LINEBREAK which apparently was part of message
+                msg += LINEBREAK
+                # read remaining bytes of content
+                msg += ser.read(expected_length - len(msg_arr[3]))
+                # remove following LINEBREAK from input
+                ser.read(2)
             # handle_incoming_msg(msg)
             msg_in.put(msg)
+
         # handle answers to commands (put them in a queue)
         elif msg.startswith(b'AT'):
             cmd_in.put(msg)
@@ -238,7 +248,7 @@ def do_setup():
     # Reset module
     setup_cmd_list.append(CmdAndAnswers(b'AT+RST', AT_OK))
     # Set config string
-    setup_cmd_list.append(CmdAndAnswers(b'AT+CFG=433000000,20,9,12,4,1,0,0,0,0,3000,8,4', AT_OK))  # AT+CFG=433000000,5,9,6,4,1,0,0,0,0,3000,8,4
+    setup_cmd_list.append(CmdAndAnswers(b'AT+CFG=433000000,20,9,12,4,1,0,0,0,0,3000,8,4', AT_OK))  # AT+CFG=433000000,5,9,7,4,1,0,0,0,0,3000,8,10
     # Set address
     setup_cmd_list.append(CmdAndAnswers(b'AT+ADDR=0004', AT_OK))
     # Activate modules receive mode
@@ -287,3 +297,6 @@ if __name__ == '__main__':
 
     # catch main thread in GUI-Loop, so program ends when window closes
     win.mainloop()
+
+    # close uart
+    ser.close()
