@@ -1,5 +1,6 @@
 import _thread
 import queue
+import random
 import sys
 import time
 
@@ -13,8 +14,6 @@ DEFAULT_LIFETIME = 180
 PATH_DISCOVERY_TIME = 30
 # Number of repetitions if no answer was received
 MSG_REPEATS = 2
-# time in seconds to wait for a RREP-ACK before resending RREP / blacklisting or giving up
-RREP_ACK_WAIT = 10
 # time in seconds an invalid route exists before deletion
 DELETE_PERIOD = 180  # TODO should also be waiting time on startup, before forwarding messages -> AODV 6.13
 # Number of repetitions for RREQs
@@ -25,6 +24,11 @@ RREP_REPEAT = 2
 S_T_R_REPEAT = 2
 # Timeout in seconds to ignored addresses
 BLACKLIST_TIMEOUT = 180
+
+
+# time in seconds to wait for a RREP-ACK before resending RREP / blacklisting or giving up
+def rrep_ack_wait() -> int:
+    return random.randint(4, 6)
 
 
 def _tbytes_to_byte_str(arr: list[Tbyte]):
@@ -183,7 +187,7 @@ class Protocol:
 
                 # RREP-ACK
                 elif msg_type == 4:
-                    self.to_display('info', str(sender) + ' acknowledged RREP.')
+                    self.to_display('info', f'{sender} acknowledged RREP.')
                     self.waited_for.append((4, sender, Tbyte(0)))
 
                 # SEND-TEXT-REQUEST
@@ -193,7 +197,7 @@ class Protocol:
                 # SEND-HOP-ACK
                 elif msg_type == 6:
                     msg_id = Tbyte(content[1])
-                    self.to_display('info', str(sender) + ' sent SEND-HOP-ACK for message: ' + str(msg_id.unsigned()))
+                    self.to_display('info', f'{sender} sent SEND-HOP-ACK for message: {msg_id.unsigned()}')
                     self.waited_for.append((6, sender, msg_id))
 
                 # SEND-TEXT-REQUEST-ACK
@@ -206,9 +210,9 @@ class Protocol:
             except ProtocolError as e:
                 self.to_display(
                     'error',
-                    'Protocol violated:' + e.message +
-                    '\nmessage as hex: ' + msg_str.hex(':') +
-                    '\nmessage as int: ' + ', '.join(str(Tbyte(y).unsigned()) for y in msg_str)
+                    f'Protocol violated: {e.message}' +
+                    f'\nmessage as hex: {content.hex(":")}' +
+                    '\nmessage as int: ' + ', '.join(f'{Tbyte(x).unsigned()}' for x in content)
                 )
 
     # ----------------------------------------------------------------------------------------------
@@ -296,20 +300,21 @@ class Protocol:
         # Active route
         # --------------------------
         else:
-            # add callback on timeout for STR-ACK
-            self.timed_tasks.append(TimedTask(
-                time_to_call=time.time() + PATH_DISCOVERY_TIME,  # wait for PATH_DISCOVERY_TIME
-                task_type='send-text-request',  # to call back
-                callback=self.__check_for_s_t_r_ack,  # this method
-                args=[text_req.msg_id, text_req.dest_addr, display_id]  # to declare S-T-R as LOST
-            ))
-            # send STR for (S_T_R_REPEAT + 1) times or until SEND-HOP-ACK received
-            self.__send_s_t_r_repeated(
-                text_req=text_req,
-                repeats=S_T_R_REPEAT
-            )
-            # signal massage sent to_display
-            self.to_display('msg-sent', display_id, dest_addr)
+            self.__do_send_s_t_r(text_req)
+
+    def __do_send_s_t_r(self, text_req: SendTextRequest):
+        # add callback on timeout for STR-ACK
+        self.timed_tasks.append(TimedTask(
+            time_to_call=time.time() + PATH_DISCOVERY_TIME,  # wait for PATH_DISCOVERY_TIME
+            task_type='send-text-request',  # to call back
+            callback=self.__check_for_s_t_r_ack,  # this method
+            args=[text_req.msg_id, text_req.dest_addr, text_req.display_id]  # to declare S-T-R as LOST
+        ))
+        self.__send_s_t_r_repeated(
+            text_req=text_req,
+            repeats=S_T_R_REPEAT
+        )
+        self.to_display('msg-sent', text_req.display_id, text_req.dest_addr)
 
     def __max_out_lifetimes(self, *dests: str):
         for dest in dests:
@@ -330,8 +335,13 @@ class Protocol:
 
         self.__max_out_lifetimes(msg_origin_addr.address_string(), msg_dest_addr.address_string())
 
-        # if for me, register in waited_for so message is not declared LOST
+        # if for me
         if msg_origin_addr.address_string() == self.address:
+            # send info to_display
+            self.to_display(
+                'info', f'{msg_dest_addr.address_string()} sent STR-ACK for message {msg_id.unsigned()}'
+            )
+            # register in waited_for so message is not declared LOST
             self.waited_for.append((7, msg_dest_addr.address_string(), msg_id))
 
             # get display_id from timed task message to signal acknowledgement to_display
@@ -339,8 +349,8 @@ class Protocol:
                 (
                     x.args[2] for x in self.timed_tasks
                     if x.task_type == 'send-text-request'
-                    and x.args[1] == msg_dest_addr
                     and x.args[0] == msg_id
+                    and x.args[1] == msg_dest_addr
                 ),
                 None
             )
@@ -375,11 +385,15 @@ class Protocol:
         """
         try:
             # if a SEND-TEXT-REQUEST-ACK from 'dest-addr' was received, message was not lost
-            found_ack = next(i for i in self.waited_for if i == (7, dest_addr, msg_id))
+            found_ack = next(i for i in self.waited_for if i == (7, dest_addr.address_string(), msg_id))
             self.waited_for.remove(found_ack)
         except StopIteration:
             # else declare message as lost
-            self.to_display('msg-lost', display_id)
+            self.to_display(
+                'info',
+                f'Message {msg_id.unsigned()} has not been acknowledged by destination {dest_addr.address_string()}'
+            )
+            self.to_display('msg-lost', display_id, dest_addr)
 
     # waits for SEND-HOP-ACK
     def __send_s_t_r_repeated(self, text_req: SendTextRequest, repeats: int):
@@ -392,18 +406,23 @@ class Protocol:
         except StopIteration:
             # else send S-T-R again, if there are repeats left
             if repeats < 0:
-                if text_req.origin_addr == self.address:
-                    self.to_display('info', str(next_hop) + ' did not acknowledge S-T-R with id: ' +
-                                    str(text_req.msg_id.unsigned()))
-                # send RERR to precursors AND delete buffered messages to dest_addr
+                if text_req.origin_addr.address_string() == self.address:
+                    self.to_display(
+                        'info', f'{next_hop} did not acknowledge S-T-R with id: {text_req.msg_id.unsigned()}'
+                    )
+                # send RERR to precursors
                 self.__declare_next_hop_unreachable(next_hop)
+                # delete buffered messages to dest_addr
+                self.to_display(
+                    'info', f'Message {text_req.msg_id.unsigned()} has not been acknowledged by next_hop {next_hop}'
+                )
                 self.__delete_buffered_messages_to(text_req.dest_addr)
             else:
                 # send message
                 self.msg_out(text_req.to_bytestring(), next_hop)
                 # register next callback at given time
                 self.timed_tasks.append(TimedTask(
-                    time_to_call=time.time() + RREP_ACK_WAIT,
+                    time_to_call=time.time() + rrep_ack_wait(),
                     task_type='send-text-request',
                     callback=self.__send_s_t_r_repeated,
                     args=[text_req, repeats - 1]
@@ -593,17 +612,14 @@ class Protocol:
                     lifetime=time.time() + msg_lifetime.unsigned()
                 )
 
-        # if i was the RREQ's originator, processing stops here
+        # if i was the RREQ's originator, send buffered text_requests
         if msg_origin_addr.address_string() == self.address:
             for text_req in [x for x in self.buffered_text_requests if x.dest_addr == msg_dest_addr]:
-                self.__send_s_t_r_repeated(
-                    text_req=text_req,
-                    repeats=S_T_R_REPEAT
-                )
+                self.__do_send_s_t_r(text_req)
 
             # stop resending of RREQ by registering the RREP
             self.waited_for.append((2, msg_dest_addr.address_string(), Tbyte(0)))
-            return None, None
+            return
 
         # -----------------------
         # SEND RREP
@@ -650,10 +666,10 @@ class Protocol:
                 # declare the node as unreachable and send RERRs
                 self.__declare_next_hop_unreachable(address)
             else:
-                self.to_display('info', 'Sending RREP to ' + address + ', ' + str(repeats) + ' repetitions left.')
+                self.to_display('info', f'Sending RREP to {address}, {repeats} repetitions left.')
                 self.msg_out(rrep, address)
                 self.timed_tasks.append(TimedTask(
-                    time_to_call=time.time() + RREP_ACK_WAIT,
+                    time_to_call=time.time() + rrep_ack_wait(),
                     task_type='rrep',
                     callback=self.__send_rrep_repeated,
                     args=[rrep, address, repeats - 1]
@@ -672,12 +688,18 @@ class Protocol:
     # ----------------------------------------------------------------------------------------------
 
     def __handle_rreq(self, prev_node: str, msg_arr: list[int]):
+
+        # -----------------------
+        # Ignore this RREQ if prev_node is blacklisted
+        # -----------------------
+        blacklisted_for = self.blacklist.get(prev_node)
+        if blacklisted_for and blacklisted_for > time.time():
+            return
+
         # -----------------------
         # deconstruct message-array items (message's content) as Tbytes
         # -----------------------
         try:
-            # msg_type, msg_uflag, msg_hop_count, msg_rreq_id, msg_origin_addr, \
-            #     msg_origin_seq_num, msg_dest_addr, msg_dest_seq_num = [Tbyte(x) for x in msg_arr]
             msg_rreq = RREQ(*[Tbyte(x) for x in msg_arr[1:]])
         except ValueError:
             raise ProtocolError('Message header has too few arguments (Type RREQ)')
@@ -810,14 +832,15 @@ class Protocol:
         except StopIteration:
             if repeats < 0:
                 self.to_display(
-                    'info', 'RREQ to ' + rreq.dest_addr.address_string() + ' timed out, no (more) repeating.'
+                    'info', f'RREQ to {rreq.dest_addr.address_string()} timed out, no (more) repeating.'
                 )
                 # delete buffered messages that have dest_addr == rreq.dest_addr
                 self.__delete_buffered_messages_to(rreq.dest_addr)
 
             else:
-                self.to_display('info', 'Sending RREQ to ' + rreq.dest_addr.address_string() +
-                                ' with ' + str(repeats) + ' repetitions.')
+                self.to_display(
+                    'info', f'Sending RREQ to {rreq.dest_addr.address_string()} with {repeats} repetitions.'
+                )
 
                 # increase rreq_id and send new rreq
                 self.msg_out(rreq.increase_rreq_id().to_bytestring(), 'FFFF')
@@ -875,12 +898,13 @@ if __name__ == '__main__':
     prot = Protocol(
         address='0004',
         msg_in=msg_to_prot,
-        msg_out=lambda msg, addr: print('\n-------------Message_out-------------\nTo ' +
-                                        str(addr) + ': ' + str(list(msg)) +
-                                        '\n-------------------------------------\n'),
-        to_display=lambda cmd, msg: print('\n-------------' + cmd + '-------------\n' +
-                                          str(msg) +
-                                          '\n--------------------------' + ('-' * len(cmd)) + '\n')
+        msg_out=lambda msg_out, addr: print('\n-------------Message_out-------------\nTo ' +
+                                            f'{addr}: {list(msg_out)}' +
+                                            '\n-------------------------------------\n'),
+        to_display=lambda cmd, msg_display, address=None: print('\n-------------' + cmd + '-------------\n' +
+                                                                f'{msg_display}' +
+                                                                '\n--------------------------' + (
+                                                                        '-' * len(cmd)) + '\n')
     )
 
     try:
@@ -905,21 +929,32 @@ if __name__ == '__main__':
     # -------------rrep
     time.sleep(3)
     rrep_test = b'LR,0003,6,' + \
-           b'\x02' + \
-           b'\x05' + \
-           b'\x06' + \
-           b'\x02' + \
-           b'\xfe' + \
-           b'\xB4'
+                b'\x02' + \
+                b'\x05' + \
+                b'\x06' + \
+                b'\x02' + \
+                b'\xfe' + \
+                b'\xB4'
     msg_to_prot.put(rrep_test)
 
     # -------------rrep-ack
     time.sleep(6)
     rrep_ack = b'LR,0005,1,' + b'\x04'
-    #msg_to_prot.put(rrep_ack)
+    msg_to_prot.put(rrep_ack)
 
-    # prot.send_s_t_r('0005', bytes('Hallo'.encode('ascii')), str(1))
-    # prot.send_s_t_r('0005', bytes('wie geht\'s'.encode('ascii')), str(1))
+    # send two messages to 6
+    prot.send_s_t_r('0006', bytes('Hallo'.encode('ascii')), 0)
+    prot.send_s_t_r('0006', bytes('wie geht\'s'.encode('ascii')), 1)
+
+    # acknowledge both messages from next_hop
+    time.sleep(6)
+    msg_to_prot.put(b'LR,0005,2,\x06\x00')
+    time.sleep(6)
+    msg_to_prot.put(b'LR,0005,2,\x06\x01')
+
+    # acknowledge only first message from destination
+    time.sleep(3)
+    msg_to_prot.put(b'LR,0005,4,\x07\x04\x06\x00')
 
     stop = ''
     while stop != 'q':
