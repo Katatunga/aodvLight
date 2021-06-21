@@ -140,7 +140,8 @@ class LoRaUI:
         # calculate amount of '-' left of state
         half_length_floored = int((len(SEPERATOR) - len(state)) / 2)
         # generate new first line
-        first_line_str = '\n' + ('-' * half_length_floored) + state + ('-' * (len(SEPERATOR) - half_length_floored))
+        first_line_str = \
+            f'\n{("-" * half_length_floored)}{state}{("-" * (len(SEPERATOR) - len(state) - half_length_floored))}'
         # get correct chat
         int_address = int(address)
         chat = self.chats[int_address]
