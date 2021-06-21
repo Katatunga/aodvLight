@@ -1,13 +1,11 @@
 import _thread
 import queue
-import struct
 import sys
-import threading
 import time
 
-from typing import Dict, Optional, Union
+from typing import Dict, Optional
 
-from HelperClasses import Tbyte, SendTextRequest, RREQ
+from HelperClasses import Tbyte, SendTextRequest, RREQ, ProtocolError, RouteTableEntry, TimedTask
 
 # default expiry_time of a route until it becomes invalid (sec)
 DEFAULT_LIFETIME = 180
@@ -27,59 +25,6 @@ RREP_REPEAT = 2
 S_T_R_REPEAT = 2
 # Timeout in seconds to ignored addresses
 BLACKLIST_TIMEOUT = 180
-
-
-class ProtocolError(Exception):
-    def __init__(self, message: str):
-        self.message = message
-
-
-class RouteTableEntry:
-    def __init__(self,
-                 destination_addr: str, dest_sequence_num: Tbyte, is_dest_seq_valid: bool,
-                 is_route_valid: bool, hops: Tbyte, next_hop: str, precursors: set[str], lifetime: float):
-        self.destination_addr = destination_addr
-        self.dest_sequence_num = dest_sequence_num
-        self.is_dest_seq_valid = is_dest_seq_valid
-        self.is_route_valid = is_route_valid
-        self.hops = hops
-        self.next_hop = next_hop
-        self.precursors = precursors
-        self.expiry_time = lifetime
-
-    def __str__(self) -> str:
-        return \
-            'dest_addr: ' + self.destination_addr + \
-            '; dest_seq_num: ' + str(self.dest_sequence_num.unsigned()) + \
-            '; is_dest_seq_valid: ' + str(self.is_dest_seq_valid) + \
-            '; is_route_valid: ' + str(self.is_route_valid) + \
-            '; hops: ' + str(self.hops.unsigned()) + \
-            '; next_hop: ' + self.next_hop + \
-            '; precursors: ' + str(self.precursors) + \
-            '; expiry_time: ' + str(self.expiry_time)
-
-    def is_valid_and_alive(self):
-        """
-        Checks if this route is valid and not expired.
-        :return: True if the route is valid and it's lifetime is not expired, False otherwise
-        """
-        return self.is_route_valid and self.expiry_time > time.time()
-
-    def invalidate(self):
-        """Invalidates this route and sets its expiry_time to time.time() + DELETE_PERIOD"""
-        self.is_route_valid = False
-        self.expiry_time = time.time() + DELETE_PERIOD
-
-
-class TimedTask:
-    def __init__(self, time_to_call: float, task_type: str, callback: callable, args: list):
-        self.time_to_call = time_to_call
-        self.task_type = task_type
-        self.callback = callback
-        self.args = args
-
-    def is_due(self) -> bool:
-        return self.time_to_call < time.time()
 
 
 def _tbytes_to_byte_str(arr: list[Tbyte]):
@@ -143,15 +88,51 @@ class Protocol:
         # return the minimum remaining time if there are tasks else return none
         return min([i.time_to_call for i in self.timed_tasks]) - time.time() if len(self.timed_tasks) > 0 else None
 
+    def __delete_expired_routes(self):
+        """
+        Deletes routes that are marked as invalid and have an expired lifetime (DELETE_PERIOD).
+        This function serves to clean up tables, RRERs will only be sent on attempted usages.
+        """
+        to_delete = [x for x in self.routes.keys() if self.routes[x].to_delete()]
+        for d_route in to_delete:
+            self.to_display(
+                'info', 'Deleted route to ' + self.routes.pop(d_route).destination_addr + '. DELETE_PERIOD expired.')
+
+    def __invalidate_expired_routes(self):
+        """
+        Invalidates routes that are marked as valid and have an expired lifetime.
+        This function serves to clean up tables, RRERs will only be sent on attempted usages.
+        """
+        to_invalidate = [
+            x for x in self.routes.keys() if self.routes[x].is_route_valid and self.routes[x].expiry_time < time.time()
+        ]
+        for i_route in to_invalidate:
+            self.to_display(
+                'info', 'Invalidated route to ' + self.routes[i_route].destination_addr + '. Route expired.')
+            self.routes[i_route].invalidate(DELETE_PERIOD)
+
+    def __delete_buffered_messages_to(self, dest_addr: Tbyte):
+        """declares all buffered messages to dest_addr as lost"""
+        lost_msgs = [x for x in self.buffered_text_requests if x.dest_addr == dest_addr]
+        for text_req in lost_msgs:
+            self.to_display('msg-lost', text_req.display_id, dest_addr.address_string())
+            self.buffered_text_requests.remove(text_req)
+
     def protocol_loop(self):
         while 1:
-            # TODO: Delete expired invalid routes
-            # do timed tasks and only block until the next task is due
+            # invalidate expired routes which are still marked as valid
+            self.__invalidate_expired_routes()
+            # delete routes that are marked as invalid and their DELETE_PERIOD expired
+            self.__delete_expired_routes()
+
+            # do timed tasks and only block until the next task is due (or indefinite if there is no task due)
             block_for_secs = self.__do_timed_tasks()
             block_for_secs = max(block_for_secs, 0) if block_for_secs else None
             try:
+                # get the next message
                 msg_str = self.msg_in.get(timeout=block_for_secs)
             except queue.Empty:
+                # if there was no massage available in time until next task is due, do due tasks
                 self.to_display('debug', 'Exited blocking on queue to do tasks')
                 continue
 
@@ -187,31 +168,39 @@ class Protocol:
             # -----------------------
             try:
                 msg_type = Tbyte(content[0]).unsigned()
-                if msg_type == 1:  # RREQ
+                # RREQ
+                if msg_type == 1:
                     self.__handle_rreq(sender, list(content))
 
-                elif msg_type == 2:  # RREP
+                # RREP
+                elif msg_type == 2:
                     self.msg_out(self.construct_rrep_ack(), sender)
                     self.__handle_rrep(sender, list(content))
 
-                elif msg_type == 3:  # RERR
+                # RERR
+                elif msg_type == 3:
                     self.__handle_rerr(sender, list(content))
 
-                elif msg_type == 4:  # RREP-ACK
+                # RREP-ACK
+                elif msg_type == 4:
                     self.to_display('info', str(sender) + ' acknowledged RREP.')
                     self.waited_for.append((4, sender, Tbyte(0)))
 
-                elif msg_type == 5:  # SEND-TEXT-REQUEST
+                # SEND-TEXT-REQUEST
+                elif msg_type == 5:
                     self.__handle_s_t_r(sender, content)
 
-                elif msg_type == 6:  # SEND-HOP-ACK
+                # SEND-HOP-ACK
+                elif msg_type == 6:
                     msg_id = Tbyte(content[1])
                     self.to_display('info', str(sender) + ' sent SEND-HOP-ACK for message: ' + str(msg_id.unsigned()))
                     self.waited_for.append((6, sender, msg_id))
 
-                elif msg_type == 7:  # SEND-TEXT-REQUEST-ACK
+                # SEND-TEXT-REQUEST-ACK
+                elif msg_type == 7:
                     self.__handle_s_t_r_ack(list(content))
 
+                # Unknown message type
                 else:
                     self.to_display('info', 'Malformed message, discarded (Type unknown')
             except ProtocolError as e:
@@ -255,7 +244,7 @@ class Protocol:
             str_ack = _tbytes_to_byte_str([Tbyte(7), msg_origin_addr, msg_dest_addr, msg_id])
             self.msg_out(str_ack, prev_node)
             # display message
-            self.to_display('msg', msg_origin_addr.address_string(), msg_id, payload)
+            self.to_display('msg', payload, msg_origin_addr)
             return
 
         # --------------------------
@@ -269,7 +258,9 @@ class Protocol:
 
             # No active route to dest, send RERR TODO: What to do if dest is next hop?
             dependants = self.__invalidate_route(msg_dest_addr.address_string(), None)
-            self.__send_rerr(dependants, [(msg_dest_addr, route_to_dest.dest_sequence_num)])
+            # if no route is known, set dest_seq_num to 0
+            dest_seq_num = route_to_dest.dest_sequence_num if route_to_dest else Tbyte(0)
+            self.__send_rerr(dependants, [(msg_dest_addr, dest_seq_num)])
             return
 
         # --------------------------
@@ -281,7 +272,7 @@ class Protocol:
         # Forward S-T-R (without changes)
         self.msg_out(msg_str, route_to_dest.next_hop)
 
-    def send_s_t_r(self, dest_addr: str, payload: bytes, display_id: str):
+    def send_s_t_r(self, dest_addr: str, payload: bytes, display_id: int):
 
         text_req = SendTextRequest(
             origin_addr=Tbyte(int(self.address)),
@@ -317,6 +308,8 @@ class Protocol:
                 text_req=text_req,
                 repeats=S_T_R_REPEAT
             )
+            # signal massage sent to_display
+            self.to_display('msg-sent', display_id, dest_addr)
 
     def __max_out_lifetimes(self, *dests: str):
         for dest in dests:
@@ -330,8 +323,8 @@ class Protocol:
             msg_type: Tbyte
             msg_origin_addr: Tbyte
             msg_dest_addr: Tbyte
-            msg_seq_num: Tbyte
-            msg_type, msg_origin_addr, msg_dest_addr, msg_seq_num = (Tbyte(x) for x in msg_str)
+            msg_id: Tbyte
+            msg_type, msg_origin_addr, msg_dest_addr, msg_id = (Tbyte(x) for x in msg_str)
         except (ValueError, IndexError):
             raise ProtocolError('Message header has too few arguments (Type RREP)')
 
@@ -339,7 +332,21 @@ class Protocol:
 
         # if for me, register in waited_for so message is not declared LOST
         if msg_origin_addr.address_string() == self.address:
-            self.waited_for.append((7, msg_dest_addr.address_string(), msg_seq_num))
+            self.waited_for.append((7, msg_dest_addr.address_string(), msg_id))
+
+            # get display_id from timed task message to signal acknowledgement to_display
+            buffered_display_id = next(
+                (
+                    x.args[2] for x in self.timed_tasks
+                    if x.task_type == 'send-text-request'
+                    and x.args[1] == msg_dest_addr
+                    and x.args[0] == msg_id
+                ),
+                None
+            )
+            if buffered_display_id:
+                self.to_display('msg-ack', buffered_display_id, msg_dest_addr.address_string())
+
         # else send on route
         else:
             route_to_origin = self.routes.get(msg_origin_addr.address_string())
@@ -347,7 +354,7 @@ class Protocol:
                 self.__send_s_t_r_ack(
                     origin_addr=msg_origin_addr,
                     dest_addr=msg_dest_addr,
-                    msg_seq_num=msg_seq_num,
+                    msg_seq_num=msg_id,
                     next_hop=route_to_origin.next_hop
                 )
 
@@ -390,8 +397,7 @@ class Protocol:
                                     str(text_req.msg_id.unsigned()))
                 # send RERR to precursors AND delete buffered messages to dest_addr
                 self.__declare_next_hop_unreachable(next_hop)
-                self.buffered_text_requests = [x for x in self.buffered_text_requests if x[0] != text_req.dest_addr]
-                # TODO: declare messages lost (maybe concat to one method with RERR-Handling
+                self.__delete_buffered_messages_to(text_req.dest_addr)
             else:
                 # send message
                 self.msg_out(text_req.to_bytestring(), next_hop)
@@ -463,7 +469,7 @@ class Protocol:
 
         return affected_dests
 
-    def __invalidate_route(self, dest_addr: str, dest_seq_num: Union[Tbyte, None]) -> set[str]:
+    def __invalidate_route(self, dest_addr: str, dest_seq_num: Optional[Tbyte]) -> set[str]:
         """
         Invalidates route to dest_addr if it exists and returns a set of all affected precursors.\n
         Sets dest_seq_num as secuence number of route. If dest_seq_num is None and if the routes sequence number
@@ -477,17 +483,19 @@ class Protocol:
         """
         dependants = set()
 
-        # invalidate route
         route_to_dest = self.routes.get(dest_addr)
         if route_to_dest is not None:
-            route_to_dest.is_route_valid = False
 
+            # invalidate route
+            route_to_dest.invalidate(DELETE_PERIOD)
+
+            # in cases (i) and (ii) of AODV 6.11 dest_seq_num should be none
             if dest_seq_num is None and route_to_dest.is_dest_seq_valid:
                 route_to_dest.dest_sequence_num.increase()
+            # if it is not None, update own route, since it is probably fresher
             elif dest_seq_num is not None:
                 route_to_dest.dest_sequence_num = dest_seq_num
 
-            route_to_dest.expiry_time = time.time() + DELETE_PERIOD
             # remember any precursors that might be affected
             dependants.update(route_to_dest.precursors)
 
@@ -601,13 +609,12 @@ class Protocol:
         # SEND RREP
         # -----------------------
 
-        # the node consults its route table entry
-        #    for the originating node to determine the next hop for the RREP
-        #    packet,
-        # TODO handle that gracefully
+        # search reverse route for next_hop to origin (should exist)
         route_to_origin = self.routes.get(msg_origin_addr.address_string())
         if route_to_origin is None:
-            raise ValueError('Received a RREP (destination: ' + msg_dest_addr.address_string() + ') to an unknown RREQ')
+            self.to_display(
+                'error', 'Received a RREP (destination: ' + msg_dest_addr.address_string() + ') to an unknown RREQ')
+            return
 
         # AODV: 6.7 last paragraph:
         # update precursor list of route_to_destination to include next_hop_to_origin
@@ -805,11 +812,8 @@ class Protocol:
                 self.to_display(
                     'info', 'RREQ to ' + rreq.dest_addr.address_string() + ' timed out, no (more) repeating.'
                 )
-                # declare all buffered messages to RREQs dest as lost
-                lost_msgs = [x for x in self.buffered_text_requests if x.dest_addr == rreq.dest_addr]
-                for text_req in lost_msgs:
-                    self.to_display('msg-lost', text_req.display_id)
-                    self.buffered_text_requests.remove(text_req)
+                # delete buffered messages that have dest_addr == rreq.dest_addr
+                self.__delete_buffered_messages_to(rreq.dest_addr)
 
             else:
                 self.to_display('info', 'Sending RREQ to ' + rreq.dest_addr.address_string() +
@@ -900,14 +904,14 @@ if __name__ == '__main__':
 
     # -------------rrep
     time.sleep(3)
-    rrep = b'LR,0003,6,' + \
+    rrep_test = b'LR,0003,6,' + \
            b'\x02' + \
            b'\x05' + \
            b'\x06' + \
            b'\x02' + \
            b'\xfe' + \
            b'\xB4'
-    msg_to_prot.put(rrep)
+    msg_to_prot.put(rrep_test)
 
     # -------------rrep-ack
     time.sleep(6)
@@ -920,5 +924,7 @@ if __name__ == '__main__':
     stop = ''
     while stop != 'q':
         stop = input()
-        bla = [str(y) + ': ' + str(prot.routes.get(y)) + '\n' for y in prot.routes.keys()]
+        bla = ''
+        for y in prot.routes.keys():
+            bla += str(y) + ': ' + str(prot.routes.get(y)) + '\n'
         print(bla)
