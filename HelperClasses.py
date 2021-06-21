@@ -97,7 +97,7 @@ class RREQ:
 
 class SendTextRequest:
     def __init__(self, origin_addr: Tbyte, dest_addr: Tbyte, msg_id: Tbyte, payload: bytes, display_id: int):
-        self.msg_type = 5
+        self.msg_type = Tbyte(5)
         self.origin_addr = origin_addr
         self.dest_addr = dest_addr
         self.msg_id = msg_id
@@ -106,9 +106,11 @@ class SendTextRequest:
 
     def to_bytestring(self):
         bs = b''
-        attributes = [self.msg_type, self.origin_addr, self.dest_addr, self.msg_id, self.payload]
+        attributes = [self.msg_type, self.origin_addr, self.dest_addr, self.msg_id]
         for attr in attributes:
             bs += attr.byte_string()
+
+        bs += self.payload
 
         return bs
 
