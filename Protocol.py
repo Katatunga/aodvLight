@@ -217,7 +217,7 @@ class Protocol:
                 self.to_display(
                     'error',
                     f'Protocol violated: {e.message}' +
-                    f'\nmessage as hex: {content.hex(":", 1)}' +
+                    f'\nmessage as hex: {content.hex()}' +
                     f'\nmessage as int: {", ".join(str(Tbyte(x).unsigned()) for x in content)}'
                 )
 
@@ -232,7 +232,7 @@ class Protocol:
             msg_origin_addr: Tbyte
             msg_dest_addr: Tbyte
             msg_id: Tbyte
-            msg_type, msg_origin_addr, msg_dest_addr, msg_id = [Tbyte(x) for x in msg_str[:3]]
+            msg_type, msg_origin_addr, msg_dest_addr, msg_id = [Tbyte(x) for x in msg_str[:4]]
             payload = msg_str[4:]
         except (ValueError, IndexError):
             raise ProtocolError('Message header has too few arguments (Type RREP)')

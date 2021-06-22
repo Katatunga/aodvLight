@@ -133,7 +133,7 @@ def write_msg_out_loop():
         time.sleep(wait_secs_to_next_cmd)
 
 
-def display_protocol(cmd: str, msg: Union[str, int], address: Optional[str] = None, state: Optional[str] = None) \
+def display_protocol(cmd: str, msg: Union[str, int, bytes], address: Optional[str] = None, state: Optional[str] = None) \
         -> Optional[int]:
     """
     Protocol machine for communication from aodv-protocol to GUI. The 'msg' is displayed according
@@ -150,9 +150,16 @@ def display_protocol(cmd: str, msg: Union[str, int], address: Optional[str] = No
         of the sender
     :type state: str
     """
+
     result = None
 
     try:
+        if isinstance(msg, bytes):
+            if msg.isascii():
+                msg = msg.decode('ascii')
+            else:
+                raise ValueError('Message is non ascii, will not be displayed')
+
         if cmd == 'msg-state':
             # update the state of the message as LOST
             if address:
@@ -182,10 +189,12 @@ def display_protocol(cmd: str, msg: Union[str, int], address: Optional[str] = No
             win.write_error(msg)
 
         else:
-            raise ValueError
+            raise ValueError(f'Command {cmd} unknown')
 
-    except (TypeError, ValueError):
-        win.write_error(f'Display protocol violated:\ncmd={cmd}, msg={msg}, address={address}, state={state}')
+    except (TypeError, ValueError) as e:
+        win.write_error(f'Display protocol violated:'
+                        f'\nErrormessage: {str(e)}'
+                        f'\nParameters: cmd={cmd}, msg={msg}, address={address}, state={state}')
 
     return result
 
@@ -282,7 +291,7 @@ def do_setup():
     setup_cmd_list.append(CmdAndAnswers(b'AT+CFG=433000000,20,9,12,4,1,0,0,0,0,3000,8,4',
                                         AT_OK))  # AT+CFG=433000000,5,9,7,4,1,0,0,0,0,3000,8,10
     # Set address
-    setup_cmd_list.append(CmdAndAnswers(b'AT+ADDR=0004', AT_OK))
+    setup_cmd_list.append(CmdAndAnswers(b'AT+ADDR=' + ADDRESS, AT_OK))
     # Set Destination
     setup_cmd_list.append(CmdAndAnswers(b'AT+DEST=FFFF', AT_OK))
     # Activate modules receive mode
@@ -296,10 +305,13 @@ def input_address():
 
     while input_addr is None:
         input_addr = input('Address: ')
-        if len(input_addr) != 4 or int(input_addr) not in range(1, 21):
+        if len(input_addr) != 4 \
+                or int(input_addr) not in range(1, 21)\
+                or not input_addr.isascii():
             print('Wrong address format.')
+            input_addr = None
 
-    return input_addr
+    return input_addr.encode('ascii')
 
 
 def input_debug():
@@ -310,6 +322,7 @@ def input_debug():
         input_deb = input_deb.lower()
         if input_deb not in ['y', 'n']:
             print('Please only enter "y" for yes or "n" for no')
+            input_deb = None
 
     return input_deb == 'y'
 
@@ -340,7 +353,7 @@ if __name__ == '__main__':
     )
 
     # create GUI
-    win = LoRaUI(send_via_protocol, handle_user_commands, "Testing Tkinter UI")
+    win = LoRaUI(send_via_protocol, handle_user_commands, f'AODV_Light for Node {ADDRESS.decode("ascii")}')
 
     # lock to use for synchronized sequential job-queueing
     lock = threading.RLock()

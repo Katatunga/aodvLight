@@ -73,26 +73,4 @@ from Util import Tbyte
 # msg = first_line_str + msg[end_of_first_line:]
 # print(msg)
 
-LINEBREAK = b'\r\n'
-
-msg = b'LR,0004,0c,1234\r\n'  # 567890\r\n
-# remove LINEBREAK
-msg = msg.rstrip(LINEBREAK)
-print(msg)
-
-# handle actual messages from outside TODO: on incomplete messages somehow everything after is incomplete
-if msg.startswith(b'LR'):
-    # if message incomplete, read rest
-    msg_arr = msg.split(b',', 3)
-    print(msg_arr, msg)
-    # TODO Incoming message is incomplete, discarded - Ignored message: b',0009,08,\x01\x01\x00\x01\t\x01\x06\x00
-    expected_length = int(msg_arr[2].decode('ascii'), base=16)
-    print(expected_length, len(msg_arr[3]))
-    if len(msg_arr[3]) < expected_length:
-        # reattach LINEBREAK which apparently was part of message
-        msg += LINEBREAK
-        print(msg)
-        # read remaining bytes of content
-        print('read ' + str(expected_length - 2 - len(msg_arr[3])))
-        # remove following LINEBREAK from input
-        #ser.read(2)
+print(int('ert'))
