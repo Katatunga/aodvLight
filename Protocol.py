@@ -217,7 +217,7 @@ class Protocol:
                 self.to_display(
                     'error',
                     f'Protocol violated: {e.message}' +
-                    f'\nmessage as hex: {content.hex(":")}' +
+                    f'\nmessage as hex: {content.hex(":", 1)}' +
                     f'\nmessage as int: {", ".join(str(Tbyte(x).unsigned()) for x in content)}'
                 )
 

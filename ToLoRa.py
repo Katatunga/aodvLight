@@ -291,7 +291,33 @@ def do_setup():
     to_out_queue(setup_cmd_list)
 
 
+def input_address():
+    input_addr = None
+
+    while input_addr is None:
+        input_addr = input('Address: ')
+        if len(input_addr) != 4 or int(input_addr) not in range(1, 21):
+            print('Wrong address format.')
+
+    return input_addr
+
+
+def input_debug():
+    input_deb = None
+
+    while input_deb is None:
+        input_deb = input('Print debug messages to "Logs and Errors" (y/n): ')
+        input_deb = input_deb.lower()
+        if input_deb not in ['y', 'n']:
+            print('Please only enter "y" for yes or "n" for no')
+
+    return input_deb == 'y'
+
+
 if __name__ == '__main__':
+
+    ADDRESS = input_address()
+    DEBUG = input_debug()
 
     # setup uart
     ser = serial.Serial(
