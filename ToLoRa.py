@@ -20,7 +20,7 @@ LINEBREAK = b'\r\n'
 ADDRESS = b'0004'
 
 # log debug
-DEBUG = False
+DEBUG = True
 # block for x seconds to wait for the answer to a command
 wait_secs_for_uart_answer = 5
 # sleep for x seconds to send next command
@@ -168,10 +168,12 @@ def display_protocol(cmd: str, msg: Union[str, int], address: Optional[str] = No
         elif cmd == 'log-out':
             win.write_to_logs(msg, True)
 
-        elif cmd == 'debug-in' and DEBUG:
-            win.write_to_logs(msg)
-        elif cmd == 'debug-out' and DEBUG:
-            win.write_to_logs(msg, True)
+        elif cmd == 'debug-in':
+            if DEBUG:
+                win.write_to_logs(msg)
+        elif cmd == 'debug-out':
+            if DEBUG:
+                win.write_to_logs(msg, True)
 
         elif cmd == 'info':
             win.write_info(msg)
@@ -200,6 +202,14 @@ def send_via_protocol(msg: str, address: str):
         display_protocol('msg-state', display_id, address=address, state='ERROR: Non-ascii')
         display_protocol('error', f'Message ({msg}) was not ASCII-encoded, discarded.')
         return
+
+
+def handle_user_commands(cmd: str, address: str):
+    if cmd == 'table':
+        table = ''
+        for y in protocol.routes.keys():
+            table += f'{y}: {protocol.routes.get(y)}\n'
+        print(table)
 
 
 def handle_errors(err_msg: bytes):
@@ -276,7 +286,7 @@ def do_setup():
     # Set Destination
     setup_cmd_list.append(CmdAndAnswers(b'AT+DEST=FFFF', AT_OK))
     # Activate modules receive mode
-    setup_cmd_list.append(CmdAndAnswers(b'AT+RX', AT_OK, lambda: display_protocol('info', 'Setup Done.')))
+    setup_cmd_list.append(CmdAndAnswers(b'AT+RX', AT_OK, lambda x: display_protocol('info', 'Setup Done.')))
 
     to_out_queue(setup_cmd_list)
 
@@ -304,7 +314,7 @@ if __name__ == '__main__':
     )
 
     # create GUI
-    win = LoRaUI(send_via_protocol, None, "Testing Tkinter UI")
+    win = LoRaUI(send_via_protocol, handle_user_commands, "Testing Tkinter UI")
 
     # lock to use for synchronized sequential job-queueing
     lock = threading.RLock()
