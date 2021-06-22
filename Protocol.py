@@ -554,15 +554,21 @@ class Protocol:
         :type list_of_dests: list[tuple[Tbyte, Tbyte]]
         """
         dep_count = len(dependants)
+        dep = 'FFFF'
 
         if dep_count == 0:
             return
         elif dep_count == 1:
             rerr = self.construct_rerr(list_of_dests)
-            self.msg_out(rerr, dependants.pop())
+            dep = dependants.pop()
+            self.msg_out(rerr, dep)
         elif dep_count > 1:
             rerr = self.construct_rerr(list_of_dests)
             self.msg_out(rerr, 'FFFF')
+
+        self.to_display(
+            'debug-out', f'Sent RERR to {dep}. Affected destinations:\n{[x[0].address_string() for x in list_of_dests]}'
+        )
 
     def construct_rerr(self, list_of_dests: list[tuple[Tbyte, Tbyte]]):
         msg_type = Tbyte(3)
@@ -685,9 +691,11 @@ class Protocol:
             # if no RREP-ACK was received, send again or blacklist
             if repeats < 0:
                 # display info on unreachable node
-                self.to_display('info', 'RREP to ' + address + ' was not acknowledged, stop repeating.')
+                self.to_display('info', f'RREP to {address} was not acknowledged, stop repeating.')
                 # blacklist unreachable node
                 self.blacklist[address] = time.time() + BLACKLIST_TIMEOUT
+                # display info that next_hop is now blacklisted
+                self.to_display('info', f'{address} was blacklisted.')
                 # declare the node as unreachable and send RERRs
                 self.__declare_next_hop_unreachable(address)
             else:

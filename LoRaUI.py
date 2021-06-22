@@ -173,7 +173,7 @@ class LoRaUI:
         first_line_str = \
             f'\n{("-" * half_length_floored)}{state}{("-" * (len(SEPERATOR) - len(state) - half_length_floored))}'
         # get correct chat
-        int_address = int(address)
+        int_address = int(address) if address != 'FFFF' else 0
         chat = self.chats[int_address]
         # extract message from chat
         msg = chat[index][0]

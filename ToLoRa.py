@@ -130,7 +130,7 @@ def write_msg_out_loop():
                 handle_errors(b'Got no answer to command "' + bytes(cmd_and_answers.cmd.rstrip(LINEBREAK)) + b'"')
 
         # wait a little to avoid CPU_busy error TODO: TEST: may not be needed since we waited for answer
-        time.sleep(wait_secs_to_next_cmd)
+        # time.sleep(wait_secs_to_next_cmd)
 
 
 def display_protocol(cmd: str, msg: Union[str, int, bytes], address: Optional[str] = None, state: Optional[str] = None) \
