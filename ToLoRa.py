@@ -19,6 +19,8 @@ AT_OK = b'AT,OK'
 LINEBREAK = b'\r\n'
 ADDRESS = b'0004'
 
+# log debug
+DEBUG = False
 # block for x seconds to wait for the answer to a command
 wait_secs_for_uart_answer = 5
 # sleep for x seconds to send next command
@@ -60,13 +62,13 @@ def send_message(msg: bytes, address: Union[bytes, str]):
         if address.isascii():
             address = address.encode('ascii')
         else:
-            win.write_error('Address (' + address + ') was not ASCII-encoded, discarded.')
+            display_protocol('error', f'Address {address}) was not ASCII-encoded, discarded.')
             return
 
     # define callback for when the message was sent TODO: may be impractical
     def print_msg_sent(answer):
         if answer == 'AT,SENDED':
-            win.write_to_messages(str(msg), str(address), True)
+            display_protocol('msg-out', str(msg), str(address))
 
     # queue commands in order, so that there is no interruption by other threads
     send_cmds = list()
@@ -102,8 +104,8 @@ def write_msg_out_loop():
         # write command to uart
         ser.write(cmd_and_answers.cmd)
 
-        # log outgoing commands
-        win.write_to_logs(str(cmd_and_answers.cmd.rstrip(LINEBREAK)), True)
+        # debug log outgoing commands
+        display_protocol('debug-out', str(cmd_and_answers.cmd.rstrip(LINEBREAK)))
 
         # for each expected answer
         for elem in cmd_and_answers.answers:
@@ -112,8 +114,8 @@ def write_msg_out_loop():
                 answer = cmd_in.get(True, timeout=wait_secs_for_uart_answer)
                 answer = bytes(answer).rstrip(LINEBREAK)
 
-                # log answer
-                win.write_to_logs(str(answer))
+                # debug log answer
+                display_protocol('debug-in', str(answer))
 
                 # if actual answer is not the expected answer (should not happen), raise error
                 if elem is not None and answer != elem:
@@ -131,7 +133,8 @@ def write_msg_out_loop():
         time.sleep(wait_secs_to_next_cmd)
 
 
-def display_protocol(cmd: str, msg: Union[str, int], address: Optional[str] = None):
+def display_protocol(cmd: str, msg: Union[str, int], address: Optional[str] = None, state: Optional[str] = None) \
+        -> Optional[int]:
     """
     Protocol machine for communication from aodv-protocol to GUI. The 'msg' is displayed according
     to the 'cmd'. However, if the 'cmd' is ['msg-lost','msg-sent','msg-ack'], 'msg' should only consist of the
@@ -140,38 +143,53 @@ def display_protocol(cmd: str, msg: Union[str, int], address: Optional[str] = No
     :type cmd: str
     :param msg: message to display or display_id of lost message
     :type msg: str
-    :param address: optional parameter that has to be given when cmd is 'msg' and contains the address
+    :param address: optional parameter that has to be given when cmd is 'msg' or 'msg-state' and contains the address
         of the sender
     :type address: str
+    :param state: optional parameter that has to be given when cmd is 'msg-state' and contains the address
+        of the sender
+    :type state: str
     """
-    if cmd == 'msg-lost':
-        # update the state of the message as LOST
-        if address:
-            win.update_message_state(address, msg, 'LOST')
-    if cmd == 'msg-pending':
-        # update the state of the message as PENDING
-        if address:
-            win.update_message_state(address, msg, 'PENDING')
-    if cmd == 'msg-sent':
-        # update the state of the message as SENT
-        if address:
-            win.update_message_state(address, msg, 'SENT')
-    elif cmd == 'msg-ack':
-        # update the state of the message as ACKNOWLEDGED
-        if address:
-            win.update_message_state(address, msg, 'ACKNOWLEDGED')
-    if cmd == 'info':
-        win.write_info(msg)
-    if cmd == 'debug':
-        win.write_to_logs(msg)
-    if cmd == 'error':
-        win.write_error(msg)
-    if cmd == 'msg':
-        win.write_to_messages(msg, address, False)
+    result = None
+
+    try:
+        if cmd == 'msg-state':
+            # update the state of the message as LOST
+            if address:
+                win.update_message_state(address, msg, state)
+
+        elif cmd == 'msg-in':
+            result = win.write_to_messages(msg, address, False)
+        elif cmd == 'msg-out':
+            result = win.write_to_messages(msg, address, True)
+
+        elif cmd == 'log-in':
+            win.write_to_logs(msg)
+        elif cmd == 'log-out':
+            win.write_to_logs(msg, True)
+
+        elif cmd == 'debug-in' and DEBUG:
+            win.write_to_logs(msg)
+        elif cmd == 'debug-out' and DEBUG:
+            win.write_to_logs(msg, True)
+
+        elif cmd == 'info':
+            win.write_info(msg)
+
+        elif cmd == 'error':
+            win.write_error(msg)
+
+        else:
+            raise ValueError
+
+    except (TypeError, ValueError):
+        win.write_error(f'Display protocol violated:\ncmd={cmd}, msg={msg}, address={address}, state={state}')
+
+    return result
 
 
 def send_via_protocol(msg: str, address: str):
-    display_id = win.write_to_messages(msg, address, True)
+    display_id = display_protocol('msg-out', msg, address)
     if msg.isascii():
         protocol.send_s_t_r(
             dest_addr=address,
@@ -179,21 +197,21 @@ def send_via_protocol(msg: str, address: str):
             display_id=display_id
         )
     else:
-        win.update_message_state(address, display_id, 'ERROR: Non-ascii')
-        win.write_error('Message (' + msg + ') was not ASCII-encoded, discarded.')
+        display_protocol('msg-state', display_id, address=address, state='ERROR: Non-ascii')
+        display_protocol('error', f'Message ({msg}) was not ASCII-encoded, discarded.')
         return
 
 
 def handle_errors(err_msg: bytes):
     if err_msg == b'ERR: CPU_BUSY':
-        win.write_error('Got: "' + err_msg.decode('ascii') + '". Reset module.')
+        display_protocol('error', f'Got: "{err_msg.decode("ascii")}". Reset module.')
         reset_module()
     else:
-        win.write_error(err_msg.decode('ascii'))
+        display_protocol('error', err_msg.decode('ascii'))
 
 
 def reset_module():
-    print("resetting lora modul...")
+    print("resetting lora module...")
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(18, GPIO.OUT)
     GPIO.output(18, GPIO.HIGH)
@@ -208,18 +226,17 @@ def read_uart_to_protocol_loop():
         msg = b''
         # block until there is something received
         msg += ser.read()
-        # block to read until LINEBREAK TODO can naturally be sent if LR, read until content_length
+        # block to read until LINEBREAK (can naturally be sent if LR, so read until content_length, see below)
         while not msg.endswith(LINEBREAK):
             msg += ser.read()
 
         # remove LINEBREAK
         msg = msg.rstrip(LINEBREAK)
 
-        # handle actual messages from outside TODO: on incomplete messages somehow everything after is incomplete
+        # handle actual messages from outside
         if msg.startswith(b'LR'):
             # if message incomplete, read rest
             msg_arr = msg.split(b',', 3)
-            # TODO Incoming message is incomplete, discarded - Ignored message: b',0009,08,\x01\x01\x00\x01\t\x01\x06\x00
             expected_length = int(msg_arr[2].decode('ascii'), base=16)
             if len(msg_arr[3]) < expected_length:
                 # reattach LINEBREAK which apparently was part of message
@@ -232,21 +249,20 @@ def read_uart_to_protocol_loop():
             msg_in.put(msg)
 
         # handle answers to commands (put them in a queue)
-        elif msg.startswith(b'AT'):
+        elif msg.startswith(b'AT') and not msg.startswith(b'AT,ERR'):
             cmd_in.put(msg)
+
         # handle possible errors
         elif msg.startswith(b'AT,ERR') or msg.startswith(b'ERR'):
             handle_errors(msg)
+
         # log everything else
         else:
-            win.write_to_logs('Ignored message: ' + str(msg))
+            display_protocol('log-in', f'Ignored message: {msg}')
 
 
 def do_setup():
     setup_cmd_list = list()
-
-    def print_setup_done(_):
-        win.write_info('Setup Done')
 
     # Test cmd
     setup_cmd_list.append(CmdAndAnswers(b'AT', AT_OK))
@@ -257,10 +273,10 @@ def do_setup():
                                         AT_OK))  # AT+CFG=433000000,5,9,7,4,1,0,0,0,0,3000,8,10
     # Set address
     setup_cmd_list.append(CmdAndAnswers(b'AT+ADDR=0004', AT_OK))
-    # Activate modules receive mode
-    setup_cmd_list.append(CmdAndAnswers(b'AT+RX', AT_OK))
     # Set Destination
-    setup_cmd_list.append(CmdAndAnswers(b'AT+DEST=FFFF', AT_OK, print_setup_done))
+    setup_cmd_list.append(CmdAndAnswers(b'AT+DEST=FFFF', AT_OK))
+    # Activate modules receive mode
+    setup_cmd_list.append(CmdAndAnswers(b'AT+RX', AT_OK, lambda: display_protocol('info', 'Setup Done.')))
 
     to_out_queue(setup_cmd_list)
 

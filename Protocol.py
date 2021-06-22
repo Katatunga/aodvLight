@@ -8,7 +8,7 @@ import time
 
 from typing import Dict, Optional
 
-from HelperClasses import Tbyte, SendTextRequest, RREQ, ProtocolError, RouteTableEntry, TimedTask
+from Util import Tbyte, SendTextRequest, RREQ, ProtocolError, RouteTableEntry, TimedTask
 
 # default expiry_time of a route until it becomes invalid (sec)
 DEFAULT_LIFETIME = 180
@@ -121,7 +121,7 @@ class Protocol:
         """declares all buffered messages to dest_addr as lost"""
         lost_msgs = [x for x in self.buffered_text_requests if x.dest_addr == dest_addr]
         for text_req in lost_msgs:
-            self.to_display('msg-lost', text_req.display_id, dest_addr.address_string())
+            self.to_display('msg-state', text_req.display_id, dest_addr.address_string(), 'LOST')
             self.buffered_text_requests.remove(text_req)
 
     def protocol_loop(self):
@@ -139,7 +139,7 @@ class Protocol:
                 msg_str = self.msg_in.get(timeout=block_for_secs)
             except queue.Empty:
                 # if there was no massage available in time until next task is due, do due tasks
-                self.to_display('debug', 'Exited blocking on queue to do tasks')
+                self.to_display('debug-out', 'Exited blocking on queue to do tasks')
                 continue
 
             # if there were outside threads registering timed tasks, they will send this command
@@ -218,7 +218,7 @@ class Protocol:
                     'error',
                     f'Protocol violated: {e.message}' +
                     f'\nmessage as hex: {content.hex(":")}' +
-                    '\nmessage as int: ' + ', '.join(f'{Tbyte(x).unsigned()}' for x in content)
+                    f'\nmessage as int: {", ".join(str(Tbyte(x).unsigned()) for x in content)}'
                 )
 
     # ----------------------------------------------------------------------------------------------
@@ -237,8 +237,17 @@ class Protocol:
         except (ValueError, IndexError):
             raise ProtocolError('Message header has too few arguments (Type RREP)')
 
+        # debug log message
+        self.to_display(
+            'debug-in', f'Got STR {msg_id} from {msg_origin_addr.address_string()} to {msg_dest_addr.address_string()}'
+        )
+
         # Send SEND-HOP-ACK
         self.msg_out(_tbytes_to_byte_str([Tbyte(6), msg_id]), prev_node)
+        # debug log sending of S-H-A
+        self.to_display(
+            'debug-out', f'Sent SHA for msg {msg_id} to {prev_node} to {msg_dest_addr.address_string()}'
+        )
 
         # --------------------------
         # Update Route to Origin and prev_node
@@ -254,7 +263,7 @@ class Protocol:
             str_ack = _tbytes_to_byte_str([Tbyte(7), msg_origin_addr, msg_dest_addr, msg_id])
             self.msg_out(str_ack, prev_node)
             # display message
-            self.to_display('msg', payload, msg_origin_addr.address_string())
+            self.to_display('msg-in', payload, msg_origin_addr.address_string())
             return
 
         # --------------------------
@@ -281,6 +290,10 @@ class Protocol:
 
         # Forward S-T-R (without changes)
         self.msg_out(msg_str, route_to_dest.next_hop)
+        # debug log forwarding
+        self.to_display(
+            'debug-out', f'Forwarded STR {msg_id} to {route_to_dest.next_hop}'
+        )
 
     def send_s_t_r(self, dest_addr: str, payload: bytes, display_id: int):
 
@@ -303,7 +316,7 @@ class Protocol:
             # send RREQ (AODV: 6.3)
             self.__originate_rreq_to(text_req.dest_addr)
             # display message as pending
-            self.to_display('msg-pending', display_id, dest_addr)
+            self.to_display('msg-state', display_id, dest_addr, 'PENDING')
         # --------------------------
         # Active route
         # --------------------------
@@ -325,7 +338,7 @@ class Protocol:
             text_req=text_req,
             repeats=S_T_R_REPEAT
         )
-        self.to_display('msg-sent', text_req.display_id, text_req.dest_addr.address_string())
+        self.to_display('msg-state', text_req.display_id, text_req.dest_addr.address_string(), 'SENT')
 
     def __max_out_lifetimes(self, *dests: str):
         for dest in dests:
@@ -366,7 +379,7 @@ class Protocol:
                 None
             )
             if buffered_display_id:
-                self.to_display('msg-ack', buffered_display_id, msg_dest_addr.address_string())
+                self.to_display('msg-state', buffered_display_id, msg_dest_addr.address_string(), 'ACKNOWLEDGED')
 
         # else send on route
         else:
@@ -404,7 +417,7 @@ class Protocol:
                 'info',
                 f'Message {msg_id.unsigned()} has not been acknowledged by destination {dest_addr.address_string()}'
             )
-            self.to_display('msg-lost', display_id, dest_addr.address_string())
+            self.to_display('msg-state', display_id, dest_addr.address_string(), 'LOST')
 
     # waits for SEND-HOP-ACK
     def __send_s_t_r_repeated(self, text_req: SendTextRequest, repeats: int):
@@ -412,8 +425,9 @@ class Protocol:
         try:
             # if a SEND-HOP-ACK from 'address' was received, no need to send S-T-R again
             found_ack = next(i for i in self.waited_for if i == (6, next_hop, text_req.msg_id))
-            # TODO: search for RERRs as well??
             self.waited_for.remove(found_ack)
+            # TODO: search for RERRs as well??
+            # if route is now invalid, resending doesn't make sense, possibly there was a RERR
         except StopIteration:
             # else send S-T-R again, if there are repeats left
             if repeats < 0:
@@ -742,7 +756,7 @@ class Protocol:
         # -----------------------
 
         # create key to find already processed RREQs (avoid loops)
-        msg_key = msg_rreq.origin_addr.address_string() + str(msg_rreq.rreq_id)
+        msg_key = f'{msg_rreq.origin_addr.address_string()}{msg_rreq.rreq_id}{msg_rreq.origin_seq_num.unsigned()}'
         ignore_until = self.processed_messages.get(msg_key)
 
         # ignore this rreq for (another) PATH_DISCOVERY_TIME seconds

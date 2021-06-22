@@ -3,7 +3,7 @@ import struct
 import sys
 import time
 
-from HelperClasses import Tbyte
+from Util import Tbyte
 
 # one = Tbyte(struct.pack('b', 127))
 # two = Tbyte(b'\x7f')
