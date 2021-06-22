@@ -201,16 +201,21 @@ def display_protocol(cmd: str, msg: Union[str, int, bytes], address: Optional[st
 
 def send_via_protocol(msg: str, address: str):
     display_id = display_protocol('msg-out', msg, address)
-    if msg.isascii():
+
+    if address == 'FFFF':
+        display_protocol('msg-state', display_id, address=address, state='ERROR: address "FFFF" invalid')
+        display_protocol('error', f'User tried to send Message ({msg}) to address "FFFF", discarded.')
+        return
+    elif not msg.isascii():
+        display_protocol('msg-state', display_id, address=address, state='ERROR: Non-ascii')
+        display_protocol('error', f'Message ({msg}) was not ASCII-encoded, discarded.')
+        return
+    else:
         protocol.send_s_t_r(
             dest_addr=address,
             payload=msg.encode('ascii'),
             display_id=display_id
         )
-    else:
-        display_protocol('msg-state', display_id, address=address, state='ERROR: Non-ascii')
-        display_protocol('error', f'Message ({msg}) was not ASCII-encoded, discarded.')
-        return
 
 
 def handle_user_commands(cmd: str, address: str):
