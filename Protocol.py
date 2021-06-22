@@ -212,7 +212,7 @@ class Protocol:
 
                 # Unknown message type
                 else:
-                    self.to_display('info', 'Malformed message, discarded (Type unknown')
+                    self.to_display('info', f'Malformed message from {sender}: {content}, discarded (Type unknown)')
             except ProtocolError as e:
                 self.to_display(
                     'error',

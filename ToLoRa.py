@@ -272,8 +272,8 @@ def read_uart_to_protocol_loop():
             # handle_incoming_msg(msg)
             msg_in.put(msg)
 
-        # handle answers to commands (put them in a queue)
-        elif msg.startswith(b'AT') and not msg.startswith(b'AT,ERR'):
+        # handle answers to commands (put them in a queue). 'Vendor' just to deal properly with AT+RST
+        elif msg.startswith(b'Vendor') or msg.startswith(b'AT') and not msg.startswith(b'AT,ERR'):
             cmd_in.put(msg)
 
         # handle possible errors
@@ -294,7 +294,7 @@ def do_setup():
     setup_cmd_list.append(CmdAndAnswers(b'AT+RST', AT_OK))
     # Set config string
     setup_cmd_list.append(CmdAndAnswers(b'AT+CFG=433000000,20,9,12,4,1,0,0,0,0,3000,8,4',
-                                        AT_OK))  # AT+CFG=433000000,5,9,7,4,1,0,0,0,0,3000,8,10
+                                        (AT_OK, b'Vendor:Himalaya')))  # AT+CFG=433000000,5,9,7,4,1,0,0,0,0,3000,8,10
     # Set address
     setup_cmd_list.append(CmdAndAnswers(b'AT+ADDR=' + ADDRESS, AT_OK))
     # Set Destination
