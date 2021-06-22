@@ -9,6 +9,10 @@ SEPERATOR = ('-' * 36)
 
 class LoRaUI:
 
+    # -------------------------------------------------------------
+    #                       SETUP
+    # -------------------------------------------------------------
+
     def get_scrolled_text(self, fg):
         scrollable = tkinter.scrolledtext.ScrolledText(self.window, bg='grey', fg=fg)
         scrollable.grid(row=1, column=0, columnspan=3)
@@ -17,7 +21,7 @@ class LoRaUI:
         scrollable.tag_configure('tag-right', justify='right')
         return scrollable
 
-    def __init__(self, on_send, on_cmd, title='LoRa'):
+    def __init__(self, on_send: callable, on_cmd: callable, title: str = 'LoRa'):
         self.window = Tk()
         self.window.title(title)
         self.window.configure(background="black")
@@ -86,10 +90,14 @@ class LoRaUI:
         text_entry = Entry(self.window, bg='white', fg='black')
         text_entry.grid(row=2, column=1, columnspan=4, sticky='nesw')
 
+        # ------------------------------
+        #     Callback for Buttons
+        # ------------------------------
+
         def callback_if_textentry(callback):
             s = text_entry.get()
             if s != '':
-                callback(s, self.dd_option.get())  # TODO? no error message on non ascii
+                callback(s, self.dd_option.get())
 
         Button(self.window, text='SEND', command=lambda: callback_if_textentry(on_send)) \
             .grid(row=2, column=4, sticky='nesw')
@@ -101,8 +109,16 @@ class LoRaUI:
     def mainloop(self):
         self.window.mainloop()
 
-    # Change text in "messages' on change of self.dd_option
+    # -------------------------------------------------------------
+    #                     Functionality
+    # -------------------------------------------------------------
+
+
     def update_messages(self, *args):
+        """
+        Updates text in "messages' according to the currently chosen option in self.dd_option
+        :param args: ignored
+        """
         self.messages.configure(state='normal')
         self.messages.delete(1.0, END)
         index = 0 if self.dd_option.get() == 'FFFF' else int(self.dd_option.get())
@@ -115,7 +131,8 @@ class LoRaUI:
     def write_to_messages(self, msg: str, address: str, is_out: bool = False) -> int:
         """
         Writes message to chat of 'address', aligned left if 'is_out' is True, otherwise aligned right.
-        Returns the index of this message as an int.\n
+        Then calls self.update_messages() to update the currently displayed text.\n
+        :return: The index of this message as an int. This can be used to reference the message in the future.\n
         """
         sender_str = 'From ' + address + ':' if not is_out else 'I wrote:'
 
@@ -137,6 +154,19 @@ class LoRaUI:
         return index
 
     def update_message_state(self, address: str, index: int, state: str):
+        """
+        Updates the messages state to 'state'. The state is used for the user to better understand
+        what happened to their message. If state is too long to display, 'Unknown State' is used as 'state'.\n
+        :param address: address of the communication partner
+        :type address: str
+        :param index: index of the message to update (received from self.write_to_messages() on message creation)
+        :type index: int
+        :param state: The state to update the message with. Can be any str with len() lesser than 34
+        :type state: str
+        """
+        if len(state) > (len(SEPERATOR) - 2):
+            state = 'Unknown State'
+
         # calculate amount of '-' left of state
         half_length_floored = int((len(SEPERATOR) - len(state)) / 2)
         # generate new first line
