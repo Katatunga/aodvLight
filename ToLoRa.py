@@ -291,10 +291,10 @@ def do_setup():
     # Test cmd
     setup_cmd_list.append(CmdAndAnswers(b'AT', AT_OK))
     # Reset module
-    setup_cmd_list.append(CmdAndAnswers(b'AT+RST', AT_OK))
+    setup_cmd_list.append(CmdAndAnswers(b'AT+RST', (AT_OK, b'Vendor:Himalaya')))
     # Set config string
-    setup_cmd_list.append(CmdAndAnswers(b'AT+CFG=433000000,20,9,12,4,1,0,0,0,0,3000,8,4',
-                                        (AT_OK, b'Vendor:Himalaya')))  # AT+CFG=433000000,5,9,7,4,1,0,0,0,0,3000,8,10
+    setup_cmd_list.append(CmdAndAnswers(b'AT+CFG=433000000,20,9,10,4,1,0,0,0,0,3000,8,10',
+                                        AT_OK))  # AT+CFG=433000000,5,9,7,4,1,0,0,0,0,3000,8,10
     # Set address
     setup_cmd_list.append(CmdAndAnswers(b'AT+ADDR=' + ADDRESS, AT_OK))
     # Set Destination

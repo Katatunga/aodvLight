@@ -135,14 +135,14 @@ class RouteTableEntry:
 
     def __str__(self) -> str:
         return \
-            'dest_addr: ' + self.destination_addr + \
-            '; dest_seq_num: ' + str(self.dest_sequence_num.unsigned()) + \
-            '; is_dest_seq_valid: ' + str(self.is_dest_seq_valid) + \
-            '; is_route_valid: ' + str(self.is_route_valid) + \
-            '; hops: ' + str(self.hops.unsigned()) + \
-            '; next_hop: ' + self.next_hop + \
-            '; precursors: ' + str(self.precursors) + \
-            '; expiry_time: ' + str(self.expiry_time)
+            f'dest_addr: {self.destination_addr}' \
+            f'; dest_seq_num: {self.dest_sequence_num.unsigned()}' \
+            f'; is_dest_seq_valid: {self.is_dest_seq_valid}' + \
+            f'; is_route_valid: {self.is_route_valid}' \
+            f'; hops: {self.hops.unsigned()}' \
+            f'; next_hop: {self.next_hop}' \
+            f'; precursors: {self.precursors}' \
+            f'; expiry_time: {self.expiry_time}'
 
     def is_valid_and_alive(self):
         """

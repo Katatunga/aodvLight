@@ -744,7 +744,7 @@ class Protocol:
 
         if route_to_prev:
             route_to_prev.is_route_valid = True
-            route_to_prev.hops = 1
+            route_to_prev.hops = Tbyte(1)
             route_to_prev.next_hop = prev_node
             route_to_prev.expiry_time = time.time() + DEFAULT_LIFETIME
         else:
