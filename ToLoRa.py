@@ -232,21 +232,29 @@ class LoRaController:
             )
 
     def handle_user_commands(self, cmd: str, address: str):
+        result = None
+
         if cmd == 'table':
             table = ''
             for y in protocol.routes.keys():
                 table += f'{y}: {protocol.routes.get(y)}\n'
             print(table)
-        if cmd == 'log-in':
-            self.show_log_in = not self.show_log_in
-        if cmd == 'log-out':
-            self.show_log_out = not self.show_log_out
-        if cmd == 'debug-in':
-            self.show_debug_in = not self.show_debug_in
-        if cmd == 'debug-out':
-            self.show_debug_out = not self.show_debug_out
-        if cmd == 'info':
-            self.show_info = not self.show_info
+            self.display_protocol('info', f"Printed table to console.")
+        elif cmd == 'log-in':
+            result = self.show_log_in = not self.show_log_in
+        elif cmd == 'log-out':
+            result = self.show_log_out = not self.show_log_out
+        elif cmd == 'debug-in':
+            result = self.show_debug_in = not self.show_debug_in
+        elif cmd == 'debug-out':
+            result = self.show_debug_out = not self.show_debug_out
+        elif cmd == 'info':
+            result = self.show_info = not self.show_info
+        else:
+            self.display_protocol('error', f'Unknown user command: {cmd}')
+
+        if result:
+            self.display_protocol('info', f'Displaying of "{cmd}" now {"ON" if result else "OFF"}')
 
     def handle_errors(self, err_msg: bytes):
         if err_msg == b'ERR: CPU_BUSY':
@@ -283,13 +291,13 @@ class LoRaController:
                 # handle_incoming_msg(msg)
                 msg_in.put(msg)
 
-            # handle answers to commands (put them in a queue). 'Vendor' just to deal properly with AT+RST
-            elif msg.startswith(b'Vendor') or msg.startswith(b'AT') and not msg.startswith(b'AT,ERR'):
-                cmd_in.put(msg)
-
             # handle possible errors
             elif msg.startswith(b'AT,ERR') or msg.startswith(b'ERR'):
                 self.handle_errors(msg)
+
+            # handle answers to commands (put them in a queue). 'Vendor' just to deal properly with AT+RST
+            elif msg.startswith(b'Vendor') or msg.startswith(b'AT'):
+                cmd_in.put(msg)
 
             # log everything else
             else:
@@ -368,8 +376,11 @@ if __name__ == '__main__':
         bytesize=serial.EIGHTBITS
     )
     # make sure uart is open
-    if not ser.is_open:
-        ser.open()
+    try:
+        if not ser.is_open:
+            ser.open()
+    except serial.SerialException:
+        print("Error opening serial port. Probably already open.", file=sys.stderr)
 
     lora_controller = LoRaController(
         address=in_address,

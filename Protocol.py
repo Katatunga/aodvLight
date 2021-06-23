@@ -757,7 +757,7 @@ class Protocol:
         except ValueError:
             raise ProtocolError('Message header has too few arguments (Type RREQ)')
 
-        self.to_display('log-out', f'Got RREQ from {prev_node} for {msg_rreq.dest_addr}')
+        self.to_display('log-out', f'Got RREQ from {prev_node} for {msg_rreq.dest_addr.address_string()}')
 
         # -----------------------
         # Create or update RouteTableEntry for previous hop (AODV: 6.5 1st paragraph)
@@ -786,7 +786,7 @@ class Protocol:
         # -----------------------
 
         # if i am the originator of this RREQ, ignore it from here
-        if msg_rreq.origin_addr == self.address:
+        if msg_rreq.origin_addr.address_string() == self.address:
             self.to_display(
                 'log-in', f'Received my own RREQ with id {msg_rreq.rreq_id.unsigned()} from {prev_node}, discarded'
             )
@@ -890,7 +890,7 @@ class Protocol:
         # broadcast forwarded RREQ
         self.msg_out(msg_rreq.to_bytestring(), 'FFFF')
         # log sending
-        self.to_display('log-out', f'Broadcasted RREQ from {msg_rreq.origin_addr}'
+        self.to_display('log-out', f'Broadcasted RREQ from {msg_rreq.origin_addr.address_string()}'
                                    f'for destination {msg_rreq.dest_addr.address_string()}')
 
     def __send_rreq_repeated(self, rreq: RREQ, repeats: int):
