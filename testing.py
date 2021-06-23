@@ -73,4 +73,4 @@ from Util import Tbyte
 # msg = first_line_str + msg[end_of_first_line:]
 # print(msg)
 
-print(int('ert'))
+print(len(b'hallo\r\r\n'.rstrip(b'\r\n')))

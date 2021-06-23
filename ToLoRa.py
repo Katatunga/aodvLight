@@ -112,7 +112,7 @@ class LoRaController:
             ser.write(cmd_and_answers.cmd)
 
             # debug log outgoing commands
-            self.display_protocol('debug-out', str(cmd_and_answers.cmd.rstrip(LINEBREAK)))
+            self.display_protocol('debug-out', str(cmd_and_answers.cmd[:-2]))
 
             # for each expected answer
             for elem in cmd_and_answers.answers:
@@ -124,7 +124,7 @@ class LoRaController:
                     if answer == b'break':
                         break
 
-                    answer = bytes(answer).rstrip(LINEBREAK)
+                    answer = bytes(answer)[:-2]
 
                     # debug log answer
                     self.display_protocol('debug-in', str(answer))
@@ -140,7 +140,7 @@ class LoRaController:
 
                 except queue.Empty:
                     self.handle_errors(
-                        b'Got no answer to command "' + bytes(cmd_and_answers.cmd.rstrip(LINEBREAK)) + b'"')
+                        b'Got no answer to command "' + bytes(cmd_and_answers.cmd[:-2]) + b'"')
 
             # wait a little to avoid CPU_busy error TODO: TEST: may not be needed since we waited for answer
             # time.sleep(wait_secs_to_next_cmd)
@@ -274,7 +274,7 @@ class LoRaController:
                 msg += ser.read()
 
             # remove LINEBREAK
-            msg = msg.rstrip(LINEBREAK)
+            msg = msg[:-2]
 
             # handle actual messages from outside
             if msg.startswith(b'LR'):
@@ -285,7 +285,7 @@ class LoRaController:
                     # reattach LINEBREAK which apparently was part of message
                     msg += LINEBREAK
                     # read remaining bytes of content (minus the LINEBREAK in message)
-                    msg += ser.read(expected_length - 2 - len(msg_arr[3]))
+                    msg += ser.read(expected_length - (len(msg_arr[3]) + 2))
                     # remove following LINEBREAK from input
                     ser.read(2)
                 # handle_incoming_msg(msg)
