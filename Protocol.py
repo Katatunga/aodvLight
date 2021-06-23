@@ -144,6 +144,7 @@ class Protocol:
 
             # if there were outside threads registering timed tasks, they will send this command
             if msg_str == b'do_tasks':
+                self.to_display('debug-out', 'Got command to exit blocking on queue to do tasks')
                 continue
 
             # break loop on command
@@ -178,7 +179,7 @@ class Protocol:
             sender: str = sender.decode('ascii')
 
             if sender not in [('0' * (4 - len(str(i)))) + str(i) for i in range(1, 21)]:
-                self.to_display('error', f'Got message from {sender}, which not a viable address, discarded.\n'
+                self.to_display('error', f'Got message from {sender}, which is not a viable address, discarded.\n'
                                          f'Message as int: {", ".join(str(Tbyte(x).unsigned()) for x in content)}')
                 continue
 
@@ -225,7 +226,7 @@ class Protocol:
             except (ProtocolError, IndexError) as e:
                 self.to_display(
                     'error',
-                    f'Protocol violated: {e.message}' +
+                    f'Message from prev_hop {sender} violated the Protocol: {e.message}' +
                     f'\nmessage as hex: {content.hex()}' +
                     f'\nmessage as int: {", ".join(str(Tbyte(x).unsigned()) for x in content)}'
                 )
@@ -766,7 +767,7 @@ class Protocol:
         try:
             msg_rreq = RREQ(*[Tbyte(x) for x in msg_arr[1:]])
         except TypeError:
-            raise ProtocolError('Message header has too few arguments (Type RREQ)')
+            raise ProtocolError(f'Message header has {len(msg_arr)} arguments (Type RREQ) instead of 8')
 
         self.to_display('log-in', f'Got RREQ from prev node {prev_node} with:\n'
                                   f'origin = {msg_rreq.origin_addr.address_string()}; '
@@ -817,7 +818,7 @@ class Protocol:
         self.processed_messages[msg_key] = time.time() + PATH_DISCOVERY_TIME
 
         # ignore the RREQ if it's entry in ignore-list exists and is not expired
-        if ignore_until and ignore_until < time.time():
+        if ignore_until and ignore_until > time.time():
             self.to_display(
                 'log-in', f'Got RREQ with key \n(ORIGIN_IP+RREQ_ID+ORIGIN_SEQ_NUM={msg_key})\na second time, discarded'
             )
@@ -825,8 +826,9 @@ class Protocol:
 
         # -----------------------
         # create or update route table entry to originator (reverse route)
-        # (AODV: 6.5 2nd paragraph (without ++hop_count))
+        # (AODV: 6.5 2nd paragraph)
         # -----------------------
+        msg_rreq.hop_count.increase()
         route_to_origin = self.routes.get(msg_rreq.origin_addr.address_string())
 
         if route_to_origin:
@@ -899,8 +901,8 @@ class Protocol:
         if route_to_dest:
             msg_rreq.dest_seq_num = max(msg_rreq.dest_seq_num, route_to_dest.dest_sequence_num)
 
-        # update RREQ to forward (AODV: 6.5 (second to last paragraph))
-        msg_rreq.hop_count.increase()
+        # update RREQ to forward (AODV: 6.5 (second to last paragraph) Probably FALSE)
+        # msg_rreq.hop_count.increase()
 
         # broadcast forwarded RREQ
         self.msg_out(msg_rreq.to_bytestring(), 'FFFF')

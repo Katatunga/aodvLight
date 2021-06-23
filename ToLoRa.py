@@ -124,8 +124,6 @@ class LoRaController:
                     if answer == b'break':
                         break
 
-                    answer = bytes(answer)[:-2]
-
                     # debug log answer
                     self.display_protocol('debug-in', str(answer))
 
