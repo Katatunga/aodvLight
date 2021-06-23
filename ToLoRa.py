@@ -377,10 +377,9 @@ if __name__ == '__main__':
     )
     # make sure uart is open
     try:
-        if not ser.is_open:
-            ser.open()
-        else:
-            raise serial.SerialException
+        if ser.is_open:
+            ser.close()
+        ser.open()
     except serial.SerialException:
         print("Error opening serial port. Probably already open.", file=sys.stderr)
         sys.exit()
