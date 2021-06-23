@@ -177,6 +177,11 @@ class Protocol:
 
             sender: str = sender.decode('ascii')
 
+            if sender not in [('0' * (4 - len(str(i)))) + str(i) for i in range(1, 21)]:
+                self.to_display('error', f'Got message from {sender}, which not a viable address, discarded.\n'
+                                         f'Message as int: {", ".join(str(Tbyte(x).unsigned()) for x in content)}')
+                continue
+
             # -----------------------
             # evaluate msg_type and hand it to correct method
             # -----------------------

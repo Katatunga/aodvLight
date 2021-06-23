@@ -184,17 +184,17 @@ class LoRaController:
 
             elif cmd == 'log-in':
                 if self.show_log_in:
-                    win.write_to_logs(msg)
+                    win.write_to_logs(msg, header='Log')
             elif cmd == 'log-out':
                 if self.show_log_out:
-                    win.write_to_logs(msg, True)
+                    win.write_to_logs(msg, True, header='Log')
 
             elif cmd == 'debug-in':
                 if self.show_debug_in:
-                    win.write_to_logs(msg)
+                    win.write_to_logs(msg, header='Debug')
             elif cmd == 'debug-out':
                 if self.show_debug_out:
-                    win.write_to_logs(msg, True)
+                    win.write_to_logs(msg, True, header='Debug')
 
             elif cmd == 'info':
                 if self.show_info:
