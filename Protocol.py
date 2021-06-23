@@ -146,6 +146,10 @@ class Protocol:
             if msg_str == b'do_tasks':
                 continue
 
+            # break loop on command
+            if msg_str == b'break':
+                break
+
             # -----------------------
             # Destructure and confirm integrity of message
             # -----------------------
@@ -168,7 +172,7 @@ class Protocol:
 
             # make sure the message is complete
             if not int(content_length.decode('ascii'), base=16) == len(content):
-                self.to_display('info', 'Incoming message is incomplete, discarded')
+                self.to_display('error', 'Incoming message is incomplete, discarded')
                 continue
 
             sender: str = sender.decode('ascii')
@@ -193,7 +197,7 @@ class Protocol:
 
                 # RREP-ACK
                 elif msg_type == 4:
-                    self.to_display('info', f'{sender} acknowledged RREP.')
+                    self.to_display('log-in', f'{sender} acknowledged RREP.')
                     self.waited_for.append((4, sender, Tbyte(0)))
 
                 # SEND-TEXT-REQUEST
@@ -203,7 +207,7 @@ class Protocol:
                 # SEND-HOP-ACK
                 elif msg_type == 6:
                     msg_id = Tbyte(content[1])
-                    self.to_display('info', f'{sender} sent SEND-HOP-ACK for message: {msg_id.unsigned()}')
+                    self.to_display('log-in', f'{sender} sent SEND-HOP-ACK for message: {msg_id.unsigned()}')
                     self.waited_for.append((6, sender, msg_id))
 
                 # SEND-TEXT-REQUEST-ACK
@@ -239,14 +243,14 @@ class Protocol:
 
         # debug log message
         self.to_display(
-            'debug-in', f'Got STR {msg_id} from {msg_origin_addr.address_string()} to {msg_dest_addr.address_string()}'
+            'log-in', f'Got STR {msg_id} from {msg_origin_addr.address_string()} to {msg_dest_addr.address_string()}'
         )
 
         # Send SEND-HOP-ACK
         self.msg_out(_tbytes_to_byte_str([Tbyte(6), msg_id]), prev_node)
         # debug log sending of S-H-A
         self.to_display(
-            'debug-out', f'Sent SHA for msg {msg_id} to {prev_node} to {msg_dest_addr.address_string()}'
+            'log-out', f'Sent SHA for msg {msg_id} to {prev_node} to {msg_dest_addr.address_string()}'
         )
 
         # --------------------------
@@ -271,6 +275,8 @@ class Protocol:
         # --------------------------
         route_to_dest = self.routes.get(msg_dest_addr.address_string())
         if not route_to_dest or route_to_dest.is_valid_and_alive() is False:
+            # Log no active route
+            self.to_display(f'log-out', f'No active route to {msg_dest_addr.address_string()}, sending RERR.')
             # prolong DELETE_PERIOD (AODV: 6.11 2nd to last sentence):
             if route_to_dest.is_route_valid is False:
                 route_to_dest.expiry_time = time.time() + DELETE_PERIOD
@@ -292,7 +298,7 @@ class Protocol:
         self.msg_out(msg_str, route_to_dest.next_hop)
         # debug log forwarding
         self.to_display(
-            'debug-out', f'Forwarded STR {msg_id} to {route_to_dest.next_hop}'
+            'log-out', f'Forwarded STR {msg_id} to {route_to_dest.next_hop}'
         )
 
     def send_s_t_r(self, dest_addr: str, payload: bytes, display_id: int):
@@ -363,7 +369,7 @@ class Protocol:
         if msg_origin_addr.address_string() == self.address:
             # send info to_display
             self.to_display(
-                'info', f'{msg_dest_addr.address_string()} sent STR-ACK for message {msg_id.unsigned()}'
+                'log-in', f'{msg_dest_addr.address_string()} sent STR-ACK for message {msg_id.unsigned()}'
             )
             # register in waited_for so message is not declared LOST
             self.waited_for.append((7, msg_dest_addr.address_string(), msg_id))
@@ -393,8 +399,9 @@ class Protocol:
                 )
 
     def __send_s_t_r_ack(self, origin_addr: Tbyte, dest_addr: Tbyte, msg_seq_num: Tbyte, next_hop: str):
-        msg = _tbytes_to_byte_str([Tbyte(7), origin_addr, dest_addr, msg_seq_num])
-        self.msg_out(msg, next_hop)
+        strack = _tbytes_to_byte_str([Tbyte(7), origin_addr, dest_addr, msg_seq_num])
+        self.msg_out(strack, next_hop)
+        self.to_display('log-out', f'Sent STR-ACK to {origin_addr.address_string()} via next hop {next_hop}')
 
     # waits for STR-ACK
     def __check_for_s_t_r_ack(self, msg_id: Tbyte, dest_addr: Tbyte, display_id: int):
@@ -466,6 +473,10 @@ class Protocol:
             list_of_dests = [(Tbyte(msg_arr[i]), Tbyte(msg_arr[i + 1])) for i in range(2, len(msg_arr))[::2]]
         except (ValueError, IndexError):
             raise ProtocolError('Message header has too few arguments (Type RERR)')
+
+        # log RERR
+        self.to_display('log-in', f'Received RERR from {prev_node}. Affected destinations:\n'
+                                  f'{[x[0].address_string() for x in list_of_dests]}')
 
         # precursors that might be affected
         dependants = set()
@@ -567,7 +578,7 @@ class Protocol:
             self.msg_out(rerr, 'FFFF')
 
         self.to_display(
-            'debug-out', f'Sent RERR to {dep}. Affected destinations:\n{[x[0].address_string() for x in list_of_dests]}'
+            'log-out', f'Sent RERR to {dep}. Affected destinations:\n{[x[0].address_string() for x in list_of_dests]}'
         )
 
     def construct_rerr(self, list_of_dests: list[tuple[Tbyte, Tbyte]]):
@@ -642,6 +653,7 @@ class Protocol:
                     precursors=set(),
                     lifetime=time.time() + msg_lifetime.unsigned()
                 )
+            self.to_display('info', f'TableEntry for destination {msg_dest_addr.address_string()} updated by RREP.')
 
         # if i was the RREQ's originator, send buffered text_requests
         if msg_origin_addr.address_string() == self.address:
@@ -650,6 +662,9 @@ class Protocol:
 
             # stop resending of RREQ by registering the RREP
             self.waited_for.append((2, msg_dest_addr.address_string(), Tbyte(0)))
+            # log RREP
+            self.to_display('log-in', f'Received RREP for destination {msg_dest_addr.address_string()} I originated.')
+            self.to_display('log-out', f'Sending texts on now known route to {msg_dest_addr.address_string()}.')
             return
 
         # -----------------------
@@ -660,7 +675,7 @@ class Protocol:
         route_to_origin = self.routes.get(msg_origin_addr.address_string())
         if route_to_origin is None:
             self.to_display(
-                'error', 'Received a RREP (destination: ' + msg_dest_addr.address_string() + ') to an unknown RREQ')
+                'error', f'Received a RREP (destination: {msg_dest_addr.address_string()}) to an unknown RREQ')
             return
 
         # AODV: 6.7 last paragraph:
@@ -678,6 +693,10 @@ class Protocol:
             dest_seq_num=msg_dest_seq_num,
             lifetime=msg_lifetime
         )
+
+        self.to_display('log-in', f'Received RREP for destination {msg_dest_addr.address_string()}.\n'
+                                  f'Forwarding it to {route_to_origin.next_hop} '
+                                  f'as next hop to originator {msg_origin_addr.address_string()}')
 
         self.__send_rrep_repeated(rrep, route_to_origin.next_hop, RREP_REPEAT)
 
@@ -699,7 +718,7 @@ class Protocol:
                 # declare the node as unreachable and send RERRs
                 self.__declare_next_hop_unreachable(address)
             else:
-                self.to_display('info', f'Sending RREP to {address}, {repeats} repetitions left.')
+                self.to_display('log-out', f'Sending RREP to {address}, {repeats} repetitions left.')
                 self.msg_out(rrep, address)
                 self.timed_tasks.append(TimedTask(
                     time_to_call=time.time() + rrep_ack_wait(),
@@ -727,6 +746,7 @@ class Protocol:
         # -----------------------
         blacklisted_for = self.blacklist.get(prev_node)
         if blacklisted_for and blacklisted_for > time.time():
+            self.to_display('log-in', f'Got RREQ from blacklisted prev_node {prev_node}')
             return
 
         # -----------------------
@@ -736,6 +756,8 @@ class Protocol:
             msg_rreq = RREQ(*[Tbyte(x) for x in msg_arr[1:]])
         except ValueError:
             raise ProtocolError('Message header has too few arguments (Type RREQ)')
+
+        self.to_display('log-out', f'Got RREQ from {prev_node} for {msg_rreq.dest_addr}')
 
         # -----------------------
         # Create or update RouteTableEntry for previous hop (AODV: 6.5 1st paragraph)
@@ -763,8 +785,17 @@ class Protocol:
         # Decide whether to process this RREQ
         # -----------------------
 
+        # if i am the originator of this RREQ, ignore it from here
+        if msg_rreq.origin_addr == self.address:
+            self.to_display(
+                'log-in', f'Received my own RREQ with id {msg_rreq.rreq_id.unsigned()} from {prev_node}, discarded'
+            )
+            return
+
         # create key to find already processed RREQs (avoid loops)
-        msg_key = f'{msg_rreq.origin_addr.address_string()}{msg_rreq.rreq_id}{msg_rreq.origin_seq_num.unsigned()}'
+        msg_key = f'{msg_rreq.origin_addr.address_string()}+' \
+                  f'{msg_rreq.rreq_id.unsigned()}+' \
+                  f'{msg_rreq.origin_seq_num.unsigned()}'
         ignore_until = self.processed_messages.get(msg_key)
 
         # ignore this rreq for (another) PATH_DISCOVERY_TIME seconds
@@ -772,7 +803,9 @@ class Protocol:
 
         # ignore the RREQ if it's entry in ignore-list exists and is not expired
         if ignore_until and ignore_until < time.time():
-            self.to_display('info', 'Got RREQ (ORIGIN_IP+RREQ_ID=' + msg_key + ') a second time, discarded')
+            self.to_display(
+                'log-in', f'Got RREQ with key \n(ORIGIN_IP+RREQ_ID+ORIGIN_SEQ_NUM={msg_key})\na second time, discarded'
+            )
             return
 
         # -----------------------
@@ -856,6 +889,9 @@ class Protocol:
 
         # broadcast forwarded RREQ
         self.msg_out(msg_rreq.to_bytestring(), 'FFFF')
+        # log sending
+        self.to_display('log-out', f'Broadcasted RREQ from {msg_rreq.origin_addr}'
+                                   f'for destination {msg_rreq.dest_addr.address_string()}')
 
     def __send_rreq_repeated(self, rreq: RREQ, repeats: int):
         try:
@@ -872,7 +908,8 @@ class Protocol:
 
             else:
                 self.to_display(
-                    'info', f'Sending RREQ to {rreq.dest_addr.address_string()} with {repeats} repetitions.'
+                    'log-out', f'Broadcasting RREQ to destination {rreq.dest_addr.address_string()} with '
+                               f'{repeats} repetitions.'
                 )
 
                 # increase rreq_id and send new rreq
