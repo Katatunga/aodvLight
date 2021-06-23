@@ -243,14 +243,16 @@ class Protocol:
 
         # debug log message
         self.to_display(
-            'log-in', f'Got STR {msg_id} from {msg_origin_addr.address_string()} to {msg_dest_addr.address_string()}'
+            'log-in', f'Got STR {msg_id.unsigned()} from {msg_origin_addr.address_string()} '
+                      f'to {msg_dest_addr.address_string()}'
         )
 
         # Send SEND-HOP-ACK
         self.msg_out(_tbytes_to_byte_str([Tbyte(6), msg_id]), prev_node)
         # debug log sending of S-H-A
         self.to_display(
-            'log-out', f'Sent SHA for msg {msg_id} to {prev_node}.\nDestination: {msg_dest_addr.address_string()}'
+            'log-out', f'Sent SHA for msg {msg_id.unsigned()} to {prev_node}.\n'
+                       f'Destination: {msg_dest_addr.address_string()}'
         )
 
         # --------------------------
@@ -759,7 +761,8 @@ class Protocol:
 
         self.to_display('log-out', f'Got RREQ from prev node {prev_node} with:\n'
                                    f'origin = {msg_rreq.origin_addr.address_string()}; '
-                                   f'rreq-id = {msg_rreq.rreq_id}; orig_seq_num = {msg_rreq.origin_seq_num};\n'
+                                   f'rreq-id = {msg_rreq.rreq_id.unsigned()}; '
+                                   f'orig_seq_num = {msg_rreq.origin_seq_num.unsigned()};\n'
                                    f'dest = {msg_rreq.dest_addr.address_string()}')
 
         # -----------------------
