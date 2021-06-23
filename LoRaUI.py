@@ -164,14 +164,8 @@ class LoRaUI:
         :param state: The state to update the message with. Can be any str with len() lesser than 34
         :type state: str
         """
-        if len(state) > (len(SEPERATOR) - 2):
-            state = 'Unknown State'
-
-        # calculate amount of '-' left of state
-        half_length_floored = int((len(SEPERATOR) - len(state)) / 2)
         # generate new first line
-        first_line_str = \
-            f'\n{("-" * half_length_floored)}{state}{("-" * (len(SEPERATOR) - len(state) - half_length_floored))}'
+        header_line = self.construct_header_line(state)
         # get correct chat
         int_address = int(address) if address != 'FFFF' else 0
         chat = self.chats[int_address]
@@ -180,33 +174,33 @@ class LoRaUI:
         # get position of second '\n'
         end_of_first_line = msg.index('\n', 1)
         # replace first line with new first line
-        chat[index] = (first_line_str + msg[end_of_first_line:], chat[index][1])
+        chat[index] = (header_line + msg[end_of_first_line:], chat[index][1])
         self.update_messages()
 
-    def write_to_logs(self, log: str, is_out: bool = False):
-        cmd_or_ans_str = 'Command:' if is_out else 'Answer:'
+    def construct_header_line(self, header) -> str:
+        if len(header) > (len(SEPERATOR) - 2):
+            header = 'Header too long'
+        # calculate amount of '-' left of state
+        half_length_floored = int((len(SEPERATOR) - len(header)) / 2)
+        # generate new first line
+        return f'\n{("-" * half_length_floored)}{header}{("-" * (len(SEPERATOR) - len(header) - half_length_floored))}'
 
+    def write_to_logs(self, log: str, is_out: bool = False, header: str = ''):
         align = 'tag-'
         align += 'left' if is_out else 'right'
 
-        s = '\n-----------------------------------\n' + \
-            cmd_or_ans_str + '\n' + \
-            log + \
-            '\n-----------------------------------\n'
+        s = f'{self.construct_header_line(header)}\n{log}\n{SEPERATOR}\n'
         self.log_text.insert('end', s, align)
         self.log_text.yview_moveto(1)
 
     def write_error(self, error: str):
-        s = '\n---------------ERROR---------------\n' + \
-            error + \
-            '\n-----------------------------------\n'
-        self.log_text.insert('end', s, 'tag-center')
-        self.log_text.yview_moveto(1)
+        self.__write_middle(error, 'ERROR')
 
     def write_info(self, info: str):
-        s = '\n----------------INFO----------------\n' + \
-            info + \
-            '\n------------------------------------\n'
+        self.__write_middle(info, 'INFO')
+
+    def __write_middle(self, content: str, header: str = ''):
+        s = f'{self.construct_header_line(header)}\n{content}\n{SEPERATOR}\n'
         self.log_text.insert('end', s, 'tag-center')
         self.log_text.yview_moveto(1)
 

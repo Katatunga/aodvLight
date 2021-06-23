@@ -522,7 +522,11 @@ class Protocol:
         # append all destinations to which the next_hop became unreachable
         for route in self.routes.values():
             if route.next_hop == unr_next_hop:
-                affected_dests.append((Tbyte(int(route.destination_addr)), route.dest_sequence_num))
+                try:
+                    affected_dests.append((Tbyte(int(route.destination_addr)), route.dest_sequence_num))
+                except ValueError:
+                    # ignore non-decimal addresses
+                    pass
 
         return affected_dests
 
@@ -759,11 +763,11 @@ class Protocol:
         except ValueError:
             raise ProtocolError('Message header has too few arguments (Type RREQ)')
 
-        self.to_display('log-out', f'Got RREQ from prev node {prev_node} with:\n'
-                                   f'origin = {msg_rreq.origin_addr.address_string()}; '
-                                   f'rreq-id = {msg_rreq.rreq_id.unsigned()}; '
-                                   f'orig_seq_num = {msg_rreq.origin_seq_num.unsigned()};\n'
-                                   f'dest = {msg_rreq.dest_addr.address_string()}')
+        self.to_display('log-in', f'Got RREQ from prev node {prev_node} with:\n'
+                                  f'origin = {msg_rreq.origin_addr.address_string()}; '
+                                  f'rreq-id = {msg_rreq.rreq_id.unsigned()}; '
+                                  f'orig_seq_num = {msg_rreq.origin_seq_num.unsigned()};\n'
+                                  f'dest = {msg_rreq.dest_addr.address_string()}')
 
         # -----------------------
         # Create or update RouteTableEntry for previous hop (AODV: 6.5 1st paragraph)
