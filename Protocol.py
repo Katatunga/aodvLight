@@ -765,7 +765,7 @@ class Protocol:
         # -----------------------
         try:
             msg_rreq = RREQ(*[Tbyte(x) for x in msg_arr[1:]])
-        except ValueError:
+        except TypeError:
             raise ProtocolError('Message header has too few arguments (Type RREQ)')
 
         self.to_display('log-in', f'Got RREQ from prev node {prev_node} with:\n'
