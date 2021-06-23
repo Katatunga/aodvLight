@@ -253,13 +253,13 @@ class LoRaController:
         else:
             self.display_protocol('error', f'Unknown user command: {cmd}')
 
-        if result:
+        if result is not None:
             self.display_protocol('info', f'Displaying of "{cmd}" now {"ON" if result else "OFF"}')
 
     def handle_errors(self, err_msg: bytes):
         if err_msg == b'ERR: CPU_BUSY':
             self.display_protocol('error', f'Got: "{err_msg.decode("ascii")}". Reset module.')
-            reset_module()
+            raise LoRaError('CPU:BUSY ERROR')
         else:
             self.display_protocol('error', err_msg.decode('ascii'))
 
@@ -379,8 +379,11 @@ if __name__ == '__main__':
     try:
         if not ser.is_open:
             ser.open()
+        else:
+            raise serial.SerialException
     except serial.SerialException:
         print("Error opening serial port. Probably already open.", file=sys.stderr)
+        sys.exit()
 
     lora_controller = LoRaController(
         address=in_address,
@@ -418,8 +421,8 @@ if __name__ == '__main__':
             cmd_in = queue.Queue
             cmd_out.put(b'break')
             cmd_out = queue.Queue
-
             reset_module()
+            sys.exit()
     except (KeyboardInterrupt, SystemExit, serial.SerialException) as e:
         print(e)
         cmd_in.put(b'break')
