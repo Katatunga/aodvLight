@@ -850,6 +850,8 @@ class Protocol:
                 lifetime=time.time() + DEFAULT_LIFETIME
             )
 
+        route_to_origin = self.routes.get(msg_rreq.origin_addr.address_string())
+
         # -----------------------
         # SEND RREP
         # -----------------------
@@ -870,7 +872,7 @@ class Protocol:
             self.__send_rrep_repeated(origin_rrep, prev_node, RREP_REPEAT)
             return
 
-        # if i know a valid route to destination, answer with that route
+        # if i know a valid route to destination, answer with that route TODO: not implemented by others
         # -----------------------
         route_to_dest = self.routes.get(msg_rreq.dest_addr.address_string())
         # evaluate whether to send route information about destination (AODV: 6.6.(ii))
