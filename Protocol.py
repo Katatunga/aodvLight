@@ -217,7 +217,7 @@ class Protocol:
                 # Unknown message type
                 else:
                     self.to_display('info', f'Malformed message from {sender}: {content}, discarded (Type unknown)')
-            except ProtocolError as e:
+            except (ProtocolError, IndexError) as e:
                 self.to_display(
                     'error',
                     f'Protocol violated: {e.message}' +
@@ -250,7 +250,7 @@ class Protocol:
         self.msg_out(_tbytes_to_byte_str([Tbyte(6), msg_id]), prev_node)
         # debug log sending of S-H-A
         self.to_display(
-            'log-out', f'Sent SHA for msg {msg_id} to {prev_node} to {msg_dest_addr.address_string()}'
+            'log-out', f'Sent SHA for msg {msg_id} to {prev_node}.\nDestination: {msg_dest_addr.address_string()}'
         )
 
         # --------------------------
@@ -336,7 +336,7 @@ class Protocol:
         # add callback on timeout for STR-ACK
         self.timed_tasks.append(TimedTask(
             time_to_call=time.time() + PATH_DISCOVERY_TIME,  # wait for PATH_DISCOVERY_TIME
-            task_type='send-text-request',  # to call back
+            task_type='check-text-request-ack',  # to call back
             callback=self.__check_for_s_t_r_ack,  # this method
             args=[text_req.msg_id, text_req.dest_addr, text_req.display_id]  # to declare S-T-R as LOST
         ))
@@ -378,7 +378,7 @@ class Protocol:
             buffered_display_id = next(
                 (
                     x.args[2] for x in self.timed_tasks
-                    if x.task_type == 'send-text-request'
+                    if x.task_type == 'check-text-request-ack'
                     and x.args[0] == msg_id
                     and x.args[1] == msg_dest_addr
                 ),
@@ -757,7 +757,10 @@ class Protocol:
         except ValueError:
             raise ProtocolError('Message header has too few arguments (Type RREQ)')
 
-        self.to_display('log-out', f'Got RREQ from {prev_node} for {msg_rreq.dest_addr.address_string()}')
+        self.to_display('log-out', f'Got RREQ from prev node {prev_node} with:\n'
+                                   f'origin = {msg_rreq.origin_addr.address_string()}; '
+                                   f'rreq-id = {msg_rreq.rreq_id}; orig_seq_num = {msg_rreq.origin_seq_num};\n'
+                                   f'dest = {msg_rreq.dest_addr.address_string()}')
 
         # -----------------------
         # Create or update RouteTableEntry for previous hop (AODV: 6.5 1st paragraph)
@@ -890,7 +893,7 @@ class Protocol:
         # broadcast forwarded RREQ
         self.msg_out(msg_rreq.to_bytestring(), 'FFFF')
         # log sending
-        self.to_display('log-out', f'Broadcasted RREQ from {msg_rreq.origin_addr.address_string()}'
+        self.to_display('log-out', f'Broadcasted RREQ from {msg_rreq.origin_addr.address_string()} '
                                    f'for destination {msg_rreq.dest_addr.address_string()}')
 
     def __send_rreq_repeated(self, rreq: RREQ, repeats: int):
