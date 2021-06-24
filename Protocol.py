@@ -270,7 +270,7 @@ class Protocol:
             str_ack = _tbytes_to_byte_str(
                 [Tbyte(7), msg_text_req.origin_addr, msg_text_req.dest_addr, msg_text_req.msg_id]
             )
-            self.msg_out(msg_text_req.to_bytestring(), prev_node)
+            self.msg_out(str_ack, prev_node)
             # display message
             self.to_display('msg-in', msg_text_req.payload, msg_text_req.origin_addr.address_string())
             return
@@ -303,7 +303,7 @@ class Protocol:
         self.__send_s_t_r_repeated(msg_text_req, MSG_REPEATS)
         # debug log forwarding
         self.to_display(
-            'log-out', f'Forwarded STR {msg_text_req.msg_id} to {route_to_dest.next_hop}'
+            'log-out', f'Forwarded STR {msg_text_req.msg_id.unsigned()} to {route_to_dest.next_hop}'
         )
 
     def send_s_t_r(self, dest_addr: str, payload: bytes, display_id: int):
@@ -446,13 +446,13 @@ class Protocol:
                 if text_req.origin_addr.address_string() == self.address:
                     self.to_display(
                         'info', f'My Message {text_req.msg_id.unsigned()} '
-                                f'to {text_req.dest_addr.address_string()}'
+                                f'to {text_req.dest_addr.address_string()} '
                                 f'has not been acknowledged by next_hop {next_hop}'
                     )
                 else:
                     self.to_display(
                         'info', f'{text_req.origin_addr.address_string()}s Message {text_req.msg_id.unsigned()} '
-                                f'to {text_req.dest_addr.address_string()}'
+                                f'to {text_req.dest_addr.address_string()} '
                                 f'has not been acknowledged by next_hop {next_hop}'
                     )
                 # send RERR to precursors

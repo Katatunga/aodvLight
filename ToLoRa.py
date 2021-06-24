@@ -299,6 +299,8 @@ class LoRaController:
             else:
                 self.display_protocol('log-in', f'Ignored message: {msg}')
 
+            self.display_protocol('debug-in', str(msg))
+
     def do_setup(self):
         setup_cmd_list = list()
 
