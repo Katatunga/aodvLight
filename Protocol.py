@@ -443,18 +443,11 @@ class Protocol:
         except StopIteration:
             # if there are no repeats left, declare message lost
             if repeats < 0:
-                if text_req.origin_addr.address_string() == self.address:
-                    self.to_display(
-                        'info', f'My Message {text_req.msg_id.unsigned()} '
-                                f'to {text_req.dest_addr.address_string()} '
-                                f'has not been acknowledged by next_hop {next_hop}'
-                    )
-                else:
-                    self.to_display(
-                        'info', f'{text_req.origin_addr.address_string()}s Message {text_req.msg_id.unsigned()} '
-                                f'to {text_req.dest_addr.address_string()} '
-                                f'has not been acknowledged by next_hop {next_hop}'
-                    )
+                self.to_display(
+                    'info', f'{text_req.origin_addr.address_string()}s Message {text_req.msg_id.unsigned()} '
+                            f'to {text_req.dest_addr.address_string()} '
+                            f'has not been acknowledged by next_hop {next_hop}'
+                )
                 # send RERR to precursors
                 self.__declare_next_hop_unreachable(next_hop)
                 # delete buffered messages to dest_addr
@@ -462,6 +455,18 @@ class Protocol:
 
             # if there are repeats left, send S-T-R again
             else:
+                if repeats < MSG_REPEATS:
+                    self.to_display(
+                        'info', f'{text_req.origin_addr.address_string()}s Message {text_req.msg_id.unsigned()} '
+                                f'to {text_req.dest_addr.address_string()} '
+                                f'has not been acknowledged by next_hop {next_hop}, sending {repeats + 1} more times.'
+                    )
+                else:
+                    self.to_display(
+                        'info',
+                        f'Sending {text_req.origin_addr.address_string()}s Message {text_req.msg_id.unsigned()} '
+                        f'to {text_req.dest_addr.address_string()} via next hop {next_hop}.'
+                    )
                 # send message
                 self.msg_out(text_req.to_bytestring(), next_hop)
                 # register next callback at given time
