@@ -680,6 +680,7 @@ class Protocol:
         if msg_origin_addr.address_string() == self.address:
             for text_req in [x for x in self.buffered_text_requests if x.dest_addr == msg_dest_addr]:
                 self.__do_send_s_t_r(text_req)
+                self.buffered_text_requests.remove(text_req)
 
             # stop resending of RREQ by registering the RREP
             self.waited_for.append((2, msg_dest_addr.address_string(), Tbyte(0)))
