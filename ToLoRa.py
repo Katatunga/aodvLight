@@ -359,9 +359,6 @@ def input_logging_bool(kind: str) -> bool:
 if __name__ == '__main__':
 
     in_address = input_address()
-    in_show_debug = input_logging_bool('debug')
-    in_show_logging = input_logging_bool('logging')
-    in_show_info = input_logging_bool('info')
 
     # setup uart
     ser = serial.Serial(
@@ -381,10 +378,7 @@ if __name__ == '__main__':
         sys.exit()
 
     lora_controller = LoRaController(
-        address=in_address,
-        show_debug=in_show_debug,
-        show_log=in_show_logging,
-        show_info=in_show_info
+        address=in_address
     )
 
     # create protocol-machine
