@@ -88,6 +88,9 @@ class LoRaUI:
 
         # Define textentry
         text_entry = Entry(self.window, bg='white', fg='black')
+        text_entry.bind('<Return>', lambda _: callback_if_textentry(on_send))
+        text_entry.bind('<Control-Return>', lambda _: callback_if_textentry(on_cmd))
+        text_entry.bind('<Control-BackSpace>', lambda _: text_entry.delete(0, tkinter.END))
         text_entry.grid(row=2, column=1, columnspan=4, sticky='nesw')
 
         # ------------------------------
@@ -210,7 +213,7 @@ def print_send(msg, dest):
     win.write_to_messages("Hallo", dest, False)
 
 
-def print_cmd(cmd):
+def print_cmd(cmd, dest):
     if cmd == "error":
         win.write_error("Etwas Schlimmes ist passiert")
     else:

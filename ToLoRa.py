@@ -47,14 +47,13 @@ class CmdAndAnswers:
 
 class LoRaController:
     def __init__(self, address: bytes = b'0004'):
-        self.pause_logging = False
         self.address = address
 
         self.log_bools: Dict[str, bool] = {}
 
-        self.log_cmds = ["pause", "debug-in", "debug-out", "log-in", "log-out", "info"]
+        self.log_cmds = ["all", "debug-in", "debug-out", "log-in", "log-out", "info"]
 
-        for x in self.log_cmds[1:]:
+        for x in self.log_cmds:
             self.log_bools[x] = True
 
         # lock to use for synchronized sequential job-queueing
@@ -181,21 +180,20 @@ class LoRaController:
                 result = win.write_to_messages(msg, address, True)
 
             elif cmd in self.log_cmds[1:-1]:
-                # if either 'pause' is True or the kind of logging is False, do not display
-                if self.log_bools.get(self.log_cmds[0]) or not self.log_bools.get(cmd):
-                    return
-
-                splt_cmd = cmd.split('-')
-                kind = splt_cmd[0]
-                is_out = True if splt_cmd[1] == 'out' else False
-                win.write_to_logs(msg, is_out, header=kind.capitalize())
+                # if either 'all' is True or the kind of logging is False, do not display
+                if self.log_bools.get(self.log_cmds[0]) and self.log_bools.get(cmd):
+                    splt_cmd = cmd.split('-')
+                    kind = splt_cmd[0]
+                    is_out = True if splt_cmd[1] == 'out' else False
+                    win.write_to_logs(msg, is_out, header=kind.capitalize())
 
             elif cmd == 'info':
-                if self.log_bools.get(cmd):
+                if self.log_bools.get(self.log_cmds[0]) and self.log_bools.get(cmd):
                     win.write_info(msg)
 
             elif cmd == 'error':
-                win.write_error(msg)
+                if self.log_bools.get(self.log_cmds[0]):
+                    win.write_error(msg)
 
             else:
                 raise ValueError(f'Command {cmd} unknown')
@@ -359,6 +357,7 @@ def input_logging_bool(kind: str) -> bool:
 
 
 if __name__ == '__main__':
+    reset_module()
 
     in_address = input_address()
 
@@ -401,25 +400,9 @@ if __name__ == '__main__':
     lora_controller.do_setup()
 
     # start loop threads
-    try:
-        _thread.start_new_thread(protocol.protocol_loop, ())
-        try:
-            _thread.start_new_thread(lora_controller.read_uart_to_protocol_loop, ())
-            _thread.start_new_thread(lora_controller.write_msg_out_loop, ())
-        except LoRaError as e:
-            print(e)
-            cmd_in.put(b'break')
-            cmd_in = queue.Queue
-            cmd_out.put(b'break')
-            cmd_out = queue.Queue
-            reset_module()
-            sys.exit()
-    except (KeyboardInterrupt, SystemExit, serial.SerialException) as e:
-        print(e)
-        cmd_in.put(b'break')
-        cmd_out.put(b'break')
-        msg_in.put(b'break')
-        sys.exit()
+    _thread.start_new_thread(protocol.protocol_loop, ())
+    _thread.start_new_thread(lora_controller.read_uart_to_protocol_loop, ())
+    _thread.start_new_thread(lora_controller.write_msg_out_loop, ())
 
     # catch main thread in GUI-Loop, so program ends when window closes
     win.mainloop()
