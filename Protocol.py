@@ -238,75 +238,72 @@ class Protocol:
     def __handle_s_t_r(self, prev_node: str, msg_str: bytes):
         # Deconstruct msg_str
         try:
-            msg_type: Tbyte
-            msg_origin_addr: Tbyte
-            msg_dest_addr: Tbyte
-            msg_id: Tbyte
-            msg_type, msg_origin_addr, msg_dest_addr, msg_id = [Tbyte(x) for x in msg_str[:4]]
-            payload = msg_str[4:]
+            msg_text_req = SendTextRequest(*[Tbyte(x) for x in msg_str[1:4]], payload=msg_str[4:], display_id=-1)
         except (ValueError, IndexError):
             raise ProtocolError('Message header has too few arguments (Type RREP)')
 
         # debug log message
         self.to_display(
-            'log-in', f'Got STR {msg_id.unsigned()} from {msg_origin_addr.address_string()} '
-                      f'to {msg_dest_addr.address_string()}'
+            'log-in', f'Got STR {msg_text_req.msg_id.unsigned()} from {msg_text_req.origin_addr.address_string()} '
+                      f'to {msg_text_req.dest_addr.address_string()}'
         )
 
         # Send SEND-HOP-ACK
-        self.msg_out(_tbytes_to_byte_str([Tbyte(6), msg_id]), prev_node)
+        self.msg_out(_tbytes_to_byte_str([Tbyte(6), msg_text_req.msg_id]), prev_node)
         # debug log sending of S-H-A
         self.to_display(
-            'log-out', f'Sent SHA for msg {msg_id.unsigned()} to {prev_node}.\n'
-                       f'Destination: {msg_dest_addr.address_string()}'
+            'log-out', f'Sent SHA for msg {msg_text_req.msg_id.unsigned()} to {prev_node}.\n'
+                       f'Destination: {msg_text_req.dest_addr.address_string()}'
         )
 
         # --------------------------
         # Update Route to Origin and prev_node
         # --------------------------
-        self.__max_out_lifetimes(prev_node, msg_origin_addr.address_string())
+        self.__max_out_lifetimes(prev_node, msg_text_req.origin_addr.address_string())
 
         # --------------------------
         # If I am the destination
         # --------------------------
         # TODO ignore messages i already displayed?
-        if msg_dest_addr.address_string() == self.address:
+        if msg_text_req.dest_addr.address_string() == self.address:
             # send S-T-R-ACK
-            str_ack = _tbytes_to_byte_str([Tbyte(7), msg_origin_addr, msg_dest_addr, msg_id])
-            self.msg_out(str_ack, prev_node)
+            str_ack = _tbytes_to_byte_str(
+                [Tbyte(7), msg_text_req.origin_addr, msg_text_req.dest_addr, msg_text_req.msg_id]
+            )
+            self.msg_out(msg_text_req.to_bytestring(), prev_node)
             # display message
-            self.to_display('msg-in', payload, msg_origin_addr.address_string())
+            self.to_display('msg-in', msg_text_req.payload, msg_text_req.origin_addr.address_string())
             return
 
         # --------------------------
         # If no active route
         # --------------------------
-        route_to_dest = self.routes.get(msg_dest_addr.address_string())
+        route_to_dest = self.routes.get(msg_text_req.dest_addr.address_string())
         if not route_to_dest or route_to_dest.is_valid_and_alive() is False:
             # Log no active route
-            self.to_display(f'log-out', f'No active route to {msg_dest_addr.address_string()}, sending RERR.')
+            self.to_display(f'log-out', f'No active route to {msg_text_req.dest_addr.address_string()}, sending RERR.')
             # prolong DELETE_PERIOD (AODV: 6.11 2nd to last sentence):
             if route_to_dest.is_route_valid is False:
                 route_to_dest.expiry_time = time.time() + DELETE_PERIOD
 
             # No active route to dest, send RERR TODO: What to do if dest is next hop?
-            dependants = self.__invalidate_route(msg_dest_addr.address_string(), None)
+            dependants = self.__invalidate_route(msg_text_req.dest_addr.address_string(), None)
             # if no route is known, set dest_seq_num to 0
             dest_seq_num = route_to_dest.dest_sequence_num if route_to_dest else Tbyte(0)
-            self.__send_rerr(dependants, [(msg_dest_addr, dest_seq_num)])
+            self.__send_rerr(dependants, [(msg_text_req.dest_addr, dest_seq_num)])
             return
 
         # --------------------------
         # Active Route exists, forward S-T-R
         # --------------------------
         # Update Routes to destination and next_hop
-        self.__max_out_lifetimes(msg_dest_addr.address_string(), route_to_dest.next_hop)
+        self.__max_out_lifetimes(msg_text_req.dest_addr.address_string(), route_to_dest.next_hop)
 
         # Forward S-T-R (without changes)
-        self.msg_out(msg_str, route_to_dest.next_hop)
+        self.__send_s_t_r_repeated(msg_text_req, MSG_REPEATS)
         # debug log forwarding
         self.to_display(
-            'log-out', f'Forwarded STR {msg_id} to {route_to_dest.next_hop}'
+            'log-out', f'Forwarded STR {msg_text_req.msg_id} to {route_to_dest.next_hop}'
         )
 
     def send_s_t_r(self, dest_addr: str, payload: bytes, display_id: int):
@@ -444,19 +441,26 @@ class Protocol:
             # TODO: search for RERRs as well??
             # if route is now invalid, resending doesn't make sense, possibly there was a RERR
         except StopIteration:
-            # else send S-T-R again, if there are repeats left
+            # if there are no repeats left, declare message lost
             if repeats < 0:
                 if text_req.origin_addr.address_string() == self.address:
                     self.to_display(
-                        'info', f'{next_hop} did not acknowledge S-T-R with id: {text_req.msg_id.unsigned()}'
+                        'info', f'My Message {text_req.msg_id.unsigned()} '
+                                f'to {text_req.dest_addr.address_string()}'
+                                f'has not been acknowledged by next_hop {next_hop}'
+                    )
+                else:
+                    self.to_display(
+                        'info', f'{text_req.origin_addr.address_string()}s Message {text_req.msg_id.unsigned()} '
+                                f'to {text_req.dest_addr.address_string()}'
+                                f'has not been acknowledged by next_hop {next_hop}'
                     )
                 # send RERR to precursors
                 self.__declare_next_hop_unreachable(next_hop)
                 # delete buffered messages to dest_addr
-                self.to_display(
-                    'info', f'Message {text_req.msg_id.unsigned()} has not been acknowledged by next_hop {next_hop}'
-                )
                 self.__delete_buffered_messages_to(text_req.dest_addr)
+
+            # if there are repeats left, send S-T-R again
             else:
                 # send message
                 self.msg_out(text_req.to_bytestring(), next_hop)
@@ -580,6 +584,11 @@ class Protocol:
         dep = 'FFFF'
 
         if dep_count == 0:
+            self.to_display(
+                'log-out',
+                f'No dependants on affected destinations: {[x[0].address_string() for x in list_of_dests]}.\n'
+                f'Did NOT send RERR'
+            )
             return
         elif dep_count == 1:
             rerr = self.construct_rerr(list_of_dests)
