@@ -244,6 +244,10 @@ class LoRaController:
             # set both versions of cmd (-in, -out) to their collective counterpart
             self.log_bools[f'{cmd}-in'] = self.log_bools[f'{cmd}-out'] = \
                 self.log_bools.get(f'{cmd}-in') and self.log_bools.get(f'{cmd}-out')
+            # log the change
+            self.display_protocol(
+                'info', f'Displaying of "{cmd}s" now {"ON" if self.log_bools[f"{cmd}-in"] else "OFF"}'
+            )
 
         else:
             self.display_protocol('error', f'Unknown user command: {cmd}')
