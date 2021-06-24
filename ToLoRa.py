@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 import threading
 import time
-from typing import Union, Optional
+from typing import Union, Optional, Dict
 
 import serial
 import _thread
@@ -46,16 +46,16 @@ class CmdAndAnswers:
 
 
 class LoRaController:
-    def __init__(self, address: bytes = b'0004',
-                 show_debug: bool = True, show_log: bool = True, show_info: bool = True):
+    def __init__(self, address: bytes = b'0004'):
+        self.pause_logging = False
         self.address = address
 
-        # Display Debug
-        self.show_debug_in = self.show_debug_out = show_debug
-        # Display Logging
-        self.show_log_in = self.show_log_out = show_log
-        # Display Infos
-        self.show_info = show_info
+        self.log_bools: Dict[str, bool] = {}
+
+        self.log_cmds = ["pause", "debug-in", "debug-out", "log-in", "log-out", "info"]
+
+        for x in self.log_cmds[1:]:
+            self.log_bools[x] = True
 
         # lock to use for synchronized sequential job-queueing
         self.lock = threading.RLock()
@@ -180,22 +180,18 @@ class LoRaController:
             elif cmd == 'msg-out':
                 result = win.write_to_messages(msg, address, True)
 
-            elif cmd == 'log-in':
-                if self.show_log_in:
-                    win.write_to_logs(msg, header='Log')
-            elif cmd == 'log-out':
-                if self.show_log_out:
-                    win.write_to_logs(msg, True, header='Log')
+            elif cmd in self.log_cmds[1:-1]:
+                # if either 'pause' is True or the kind of logging is False, do not display
+                if self.log_bools.get(self.log_cmds[0]) or not self.log_bools.get(cmd):
+                    return
 
-            elif cmd == 'debug-in':
-                if self.show_debug_in:
-                    win.write_to_logs(msg, header='Debug')
-            elif cmd == 'debug-out':
-                if self.show_debug_out:
-                    win.write_to_logs(msg, True, header='Debug')
+                splt_cmd = cmd.split('-')
+                kind = splt_cmd[0]
+                is_out = True if splt_cmd[1] == 'out' else False
+                win.write_to_logs(msg, is_out, header=kind.capitalize())
 
             elif cmd == 'info':
-                if self.show_info:
+                if self.log_bools.get(cmd):
                     win.write_info(msg)
 
             elif cmd == 'error':
@@ -230,7 +226,6 @@ class LoRaController:
             )
 
     def handle_user_commands(self, cmd: str, address: str):
-        result = None
 
         if cmd == 'table':
             table = ''
@@ -238,21 +233,20 @@ class LoRaController:
                 table += f'{y}: {protocol.routes.get(y)}\n'
             print(table)
             self.display_protocol('info', f"Printed table to console.")
-        elif cmd == 'log-in':
-            result = self.show_log_in = not self.show_log_in
-        elif cmd == 'log-out':
-            result = self.show_log_out = not self.show_log_out
-        elif cmd == 'debug-in':
-            result = self.show_debug_in = not self.show_debug_in
-        elif cmd == 'debug-out':
-            result = self.show_debug_out = not self.show_debug_out
-        elif cmd == 'info':
-            result = self.show_info = not self.show_info
+
+        # handle logging commands
+        elif cmd in self.log_cmds:
+            self.log_bools[cmd] = not self.log_bools.get(cmd)
+            self.display_protocol('info', f'Displaying of "{cmd}" now {"ON" if self.log_bools[cmd] else "OFF"}')
+
+        # handle shortcuts for logging commands
+        elif cmd in ['debug', 'log']:
+            # set both versions of cmd (-in, -out) to their collective counterpart
+            self.log_bools[f'{cmd}-in'] = self.log_bools[f'{cmd}-out'] = \
+                self.log_bools.get(f'{cmd}-in') and self.log_bools.get(f'{cmd}-out')
+
         else:
             self.display_protocol('error', f'Unknown user command: {cmd}')
-
-        if result is not None:
-            self.display_protocol('info', f'Displaying of "{cmd}" now {"ON" if result else "OFF"}')
 
     def handle_errors(self, err_msg: bytes):
         if err_msg == b'ERR: CPU_BUSY':
