@@ -286,6 +286,8 @@ class LoRaController:
                     ser.read(2)
                 # handle_incoming_msg(msg)
                 msg_in.put(msg)
+                # debug log incoming message
+                self.display_protocol('debug-in', str(msg))
 
             # handle possible errors
             elif msg.startswith(b'AT,ERR') or msg.startswith(b'ERR'):
@@ -298,8 +300,6 @@ class LoRaController:
             # log everything else
             else:
                 self.display_protocol('log-in', f'Ignored message: {msg}')
-
-            self.display_protocol('debug-in', str(msg))
 
     def do_setup(self):
         setup_cmd_list = list()
