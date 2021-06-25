@@ -15,6 +15,7 @@ from LoRaUI import LoRaUI
 
 # often used strings
 from Protocol import Protocol
+from Util import LoopingThread
 
 AT_OK = b'AT,OK'
 LINEBREAK = b'\r\n'
@@ -25,10 +26,6 @@ wait_secs_for_uart_answer = 5
 wait_secs_to_next_cmd = 0.5
 # send hello every x seconds
 hello_secs = 10
-
-cmd_out = queue.Queue()
-cmd_in = queue.Queue()
-msg_in = queue.Queue()
 
 
 class LoRaError(Exception):
@@ -59,8 +56,30 @@ class LoRaController:
         # lock to use for synchronized sequential job-queueing
         self.lock = threading.RLock()
 
-    # write to cmd_out queue to send a message (AT+SEND)
+        # Create queues for loop / thread communication
+        self.cmd_out = queue.Queue()
+        self.cmd_in = queue.Queue()
+        self.msg_in = queue.Queue()
+
+    def get_message_queue(self):
+        """
+        Returns the queue to which incoming messages (starting with 'LR') will be put
+        """
+        return self.msg_in
+
+    def break_queues(self):
+        for q in [self.cmd_out, self.cmd_in, self.msg_in]:
+            q.put('break')
+
     def send_message(self, msg: bytes, address: Union[bytes, str]):
+        """
+        Writes to cmd_out queue to send a message. Includes the following commands:
+        AT+DEST='address' -> AT+SEND=len('msg') -> msg\n
+        :param msg: message to send
+        :type msg: bytes
+        :param address: address to send message to
+        :type address: Union[bytes, str]
+        """
         # if address was passed as a string, encode it as ascii
         if isinstance(address, str):
             if address.isascii():
@@ -91,13 +110,13 @@ class LoRaController:
         with self.lock:
             for elem in cmds_and_answers:
                 # put command and expected answer(s) into queue
-                cmd_out.put(elem)
+                self.cmd_out.put(elem)
 
     def write_msg_out_loop(self):
         """ write the commands in cmd_out queue to uart, then wait for and handle the answers in cmd_in """
         while 1:
             # get next command and expected answer(s) (as instance of CmdAndAnswers)
-            cmd_and_answers = cmd_out.get(True)
+            cmd_and_answers = self.cmd_out.get(True)
 
             # break loop on command
             if cmd_and_answers == b'break':
@@ -117,7 +136,7 @@ class LoRaController:
             for elem in cmd_and_answers.answers:
                 try:
                     # get the actual answer (and strip off LINEBREAK)
-                    answer = cmd_in.get(True, timeout=wait_secs_for_uart_answer)
+                    answer = self.cmd_in.get(True, timeout=wait_secs_for_uart_answer)
 
                     # break loop on command
                     if answer == b'break':
@@ -139,8 +158,67 @@ class LoRaController:
                     self.handle_errors(
                         b'Got no answer to command "' + bytes(cmd_and_answers.cmd[:-2]) + b'"')
 
-            # wait a little to avoid CPU_busy error TODO: TEST: may not be needed since we waited for answer
-            # time.sleep(wait_secs_to_next_cmd)
+    def read_uart_to_protocol_loop(self):
+        """ Reads from serial port and hands out the result according to the context. """
+        while 1:
+            # start with an empty string to put the message in
+            msg = b''
+            # block until there is something received
+            msg += ser.read()
+            # block to read until LINEBREAK (can naturally be sent if LR, so read until content_length, see below)
+            while not msg.endswith(LINEBREAK):
+                msg += ser.read()
+
+            # remove LINEBREAK
+            msg = msg[:-2]
+
+            # handle actual messages from outside
+            if msg.startswith(b'LR'):
+                # if message incomplete, read rest
+                msg_arr = msg.split(b',', 3)
+                expected_length = int(msg_arr[2].decode('ascii'), base=16)
+                if len(msg_arr[3]) < expected_length:
+                    # reattach LINEBREAK which apparently was part of message
+                    msg += LINEBREAK
+                    # read remaining bytes of content (minus the LINEBREAK in message)
+                    msg += ser.read(expected_length - (len(msg_arr[3]) + 2))
+                    # remove following LINEBREAK from input
+                    ser.read(2)
+                # handle_incoming_msg(msg)
+                self.msg_in.put(msg)
+                # debug log incoming message
+                self.display_protocol('debug-in', str(msg))
+
+            # handle possible errors
+            elif msg.startswith(b'AT,ERR') or msg.startswith(b'ERR'):
+                self.handle_errors(msg)
+
+            # handle answers to commands (put them in a queue). 'Vendor' just to deal properly with AT+RST
+            elif msg.startswith(b'Vendor') or msg.startswith(b'AT'):
+                self.cmd_in.put(msg)
+
+            # log everything else
+            else:
+                self.display_protocol('log-in', f'Ignored message: {msg}')
+
+    def handle_errors(self, err_msg: bytes):
+        if err_msg == b'ERR:CPU_BUSY':
+            # lock cmd_out, so nothing new will be put in
+            with self.lock:
+                # display the error
+                self.display_protocol('error', f'Got: "{err_msg.decode("ascii")}". Reset module.')
+                # clear cmd_out, so writing loop will block indefinitely and all old commands are forgotten
+                try:
+                    while 1:
+                        self.cmd_out.get(False)
+                except queue.Empty:
+                    pass
+                # break writing loop out of waiting for an answer
+                self.cmd_in.put(b'break')
+                # reset the module
+                self.do_setup()
+        else:
+            self.display_protocol('error', err_msg.decode('ascii'))
 
     def display_protocol(self, cmd: str, msg: Union[str, int, bytes], address: Optional[str] = None,
                          state: Optional[str] = None) -> Optional[int]:
@@ -250,56 +328,8 @@ class LoRaController:
         else:
             self.display_protocol('error', f'Unknown user command: {cmd}')
 
-    def handle_errors(self, err_msg: bytes):
-        if err_msg == b'ERR: CPU_BUSY':
-            self.display_protocol('error', f'Got: "{err_msg.decode("ascii")}". Reset module.')
-            raise LoRaError('CPU:BUSY ERROR')
-        else:
-            self.display_protocol('error', err_msg.decode('ascii'))
-
-    def read_uart_to_protocol_loop(self):
-        while 1:
-            # start with an empty string to put the message in
-            msg = b''
-            # block until there is something received
-            msg += ser.read()
-            # block to read until LINEBREAK (can naturally be sent if LR, so read until content_length, see below)
-            while not msg.endswith(LINEBREAK):
-                msg += ser.read()
-
-            # remove LINEBREAK
-            msg = msg[:-2]
-
-            # handle actual messages from outside
-            if msg.startswith(b'LR'):
-                # if message incomplete, read rest
-                msg_arr = msg.split(b',', 3)
-                expected_length = int(msg_arr[2].decode('ascii'), base=16)
-                if len(msg_arr[3]) < expected_length:
-                    # reattach LINEBREAK which apparently was part of message
-                    msg += LINEBREAK
-                    # read remaining bytes of content (minus the LINEBREAK in message)
-                    msg += ser.read(expected_length - (len(msg_arr[3]) + 2))
-                    # remove following LINEBREAK from input
-                    ser.read(2)
-                # handle_incoming_msg(msg)
-                msg_in.put(msg)
-                # debug log incoming message
-                self.display_protocol('debug-in', str(msg))
-
-            # handle possible errors
-            elif msg.startswith(b'AT,ERR') or msg.startswith(b'ERR'):
-                self.handle_errors(msg)
-
-            # handle answers to commands (put them in a queue). 'Vendor' just to deal properly with AT+RST
-            elif msg.startswith(b'Vendor') or msg.startswith(b'AT'):
-                cmd_in.put(msg)
-
-            # log everything else
-            else:
-                self.display_protocol('log-in', f'Ignored message: {msg}')
-
     def do_setup(self):
+        self.reset_module()
         setup_cmd_list = list()
 
         # Test cmd
@@ -318,15 +348,14 @@ class LoRaController:
 
         self.to_out_queue(setup_cmd_list)
 
-
-def reset_module():
-    print("resetting lora module...")
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setup(18, GPIO.OUT)
-    GPIO.output(18, GPIO.HIGH)
-    time.sleep(1)
-    GPIO.output(18, GPIO.LOW)
-    GPIO.cleanup()
+    def reset_module(self):
+        print("resetting lora module...")
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(18, GPIO.OUT)
+        GPIO.output(18, GPIO.HIGH)
+        time.sleep(1)
+        GPIO.output(18, GPIO.LOW)
+        GPIO.cleanup()
 
 
 def input_address():
@@ -357,8 +386,8 @@ def input_logging_bool(kind: str) -> bool:
 
 
 if __name__ == '__main__':
-    reset_module()
 
+    # let user input address
     in_address = input_address()
 
     # setup uart
@@ -385,7 +414,7 @@ if __name__ == '__main__':
     # create protocol-machine
     protocol = Protocol(
         address=in_address.decode('ascii'),
-        msg_in=msg_in,
+        msg_in=lora_controller.get_message_queue(),
         msg_out=lora_controller.send_message,
         to_display=lora_controller.display_protocol
     )
@@ -400,12 +429,26 @@ if __name__ == '__main__':
     lora_controller.do_setup()
 
     # start loop threads
-    _thread.start_new_thread(protocol.protocol_loop, ())
-    _thread.start_new_thread(lora_controller.read_uart_to_protocol_loop, ())
-    _thread.start_new_thread(lora_controller.write_msg_out_loop, ())
+    prot_thread = LoopingThread('Protocol_Loop', protocol.protocol_loop)
+    # _thread.start_new_thread(protocol.protocol_loop, ())
+    read_thread = LoopingThread('Read_uart_Loop', lora_controller.read_uart_to_protocol_loop)
+    # _thread.start_new_thread(lora_controller.read_uart_to_protocol_loop, ())
+    write_thread = LoopingThread('Write_uart_Loop', lora_controller.write_msg_out_loop)
+    # _thread.start_new_thread(lora_controller.write_msg_out_loop, ())
+
+    threads = [prot_thread, read_thread, write_thread]
+    for thread in threads:
+        thread.start()
 
     # catch main thread in GUI-Loop, so program ends when window closes
     win.mainloop()
+
+    # break all thread-blocks after window closes
+    lora_controller.break_queues()
+
+    for thread in threads:
+        if thread.isAlive():
+            thread.join()
 
     # close uart
     ser.close()

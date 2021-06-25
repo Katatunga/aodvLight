@@ -1,9 +1,23 @@
 from __future__ import annotations
 
 import struct
+import sys
 import threading
 import time
 from typing import Optional, Union
+
+
+class LoopingThread(threading.Thread):
+    def __init__(self, name: str, loop: callable):
+        threading.Thread.__init__(self)
+        self.name = name
+        self.loop = loop
+
+    def run(self):
+        print("Starting " + self.name)
+        self.loop()
+        print("Exiting " + self.name)
+        sys.exit()
 
 
 class Tbyte:
