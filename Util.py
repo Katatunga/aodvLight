@@ -12,14 +12,14 @@ class LoopingThread(threading.Thread):
         threading.Thread.__init__(self)
         self.name = name
         self.loop = loop
-        self.stop = False
+        self.stopping = False
 
     def stop(self):
-        self.stop = True
+        self.stopping = True
 
     def run(self):
         print("Starting " + self.name)
-        while not self.stop:
+        while not self.stopping:
             self.loop()
         print("Exiting " + self.name)
         sys.exit()

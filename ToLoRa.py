@@ -441,7 +441,7 @@ if __name__ == '__main__':
         thread.start()
 
     # set flag to activate gui
-    lora_controller.gui_active = False
+    lora_controller.gui_active = True
 
     # catch main thread in GUI-Loop, so program ends when window closes
     win.mainloop()
