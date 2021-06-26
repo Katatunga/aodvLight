@@ -53,6 +53,8 @@ class LoRaController:
         for x in self.log_cmds:
             self.log_bools[x] = True
 
+        self.gui_active = False
+
         # lock to use for synchronized sequential job-queueing
         self.lock = threading.RLock()
 
@@ -69,7 +71,7 @@ class LoRaController:
 
     def break_queues(self):
         for q in [self.cmd_out, self.cmd_in, self.msg_in]:
-            q.put('break')
+            q.put(b'break')
 
     def send_message(self, msg: bytes, address: Union[bytes, str]):
         """
@@ -114,92 +116,90 @@ class LoRaController:
 
     def write_msg_out_loop(self):
         """ write the commands in cmd_out queue to uart, then wait for and handle the answers in cmd_in """
-        while 1:
-            # get next command and expected answer(s) (as instance of CmdAndAnswers)
-            cmd_and_answers = self.cmd_out.get(True)
+        # get next command and expected answer(s) (as instance of CmdAndAnswers)
+        cmd_and_answers = self.cmd_out.get(True)
 
-            # break loop on command
-            if cmd_and_answers == b'break':
-                break
+        # break loop on command
+        if cmd_and_answers == b'break':
+            return
 
-            # make sure cmd_and_answers is of type CmdAndAnswers
-            if not isinstance(cmd_and_answers, CmdAndAnswers):
-                raise TypeError('Did not use correct class to represent command')
+        # make sure cmd_and_answers is of type CmdAndAnswers
+        if not isinstance(cmd_and_answers, CmdAndAnswers):
+            raise TypeError('Did not use correct class to represent command')
 
-            # write command to uart
-            ser.write(cmd_and_answers.cmd)
+        # write command to uart
+        ser.write(cmd_and_answers.cmd)
 
-            # debug log outgoing commands
-            self.display_protocol('debug-out', str(cmd_and_answers.cmd[:-2]))
+        # debug log outgoing commands
+        self.display_protocol('debug-out', str(cmd_and_answers.cmd[:-2]))
 
-            # for each expected answer
-            for elem in cmd_and_answers.answers:
-                try:
-                    # get the actual answer (and strip off LINEBREAK)
-                    answer = self.cmd_in.get(True, timeout=wait_secs_for_uart_answer)
+        # for each expected answer
+        for elem in cmd_and_answers.answers:
+            try:
+                # get the actual answer (and strip off LINEBREAK)
+                answer = self.cmd_in.get(True, timeout=wait_secs_for_uart_answer)
 
-                    # break loop on command
-                    if answer == b'break':
-                        break
+                # break loop on command
+                if answer == b'break':
+                    break
 
-                    # debug log answer
-                    self.display_protocol('debug-in', str(answer))
+                # debug log answer
+                self.display_protocol('debug-in', str(answer))
 
-                    # if actual answer is not the expected answer (should not happen), raise error
-                    if elem is not None and answer != elem:
-                        self.handle_errors(b'"' + cmd_and_answers.cmd + b'" was not answered with "' +
-                                           elem + b'", but instead with "' + answer + b'"')
+                # if actual answer is not the expected answer (should not happen), raise error
+                if elem is not None and answer != elem:
+                    self.handle_errors(b'"' + cmd_and_answers.cmd + b'" was not answered with "' +
+                                       elem + b'", but instead with "' + answer + b'"')
 
-                    # if cmd_and_answers contains a callback, call it with the actual answer
-                    if cmd_and_answers.callback:
-                        cmd_and_answers.callback(answer)
+                # if cmd_and_answers contains a callback, call it with the actual answer
+                if cmd_and_answers.callback:
+                    cmd_and_answers.callback(answer)
 
-                except queue.Empty:
-                    self.handle_errors(
-                        b'Got no answer to command "' + bytes(cmd_and_answers.cmd[:-2]) + b'"')
+            except queue.Empty:
+                self.handle_errors(
+                    b'Got no answer to command "' + bytes(cmd_and_answers.cmd[:-2]) + b'"')
 
     def read_uart_to_protocol_loop(self):
         """ Reads from serial port and hands out the result according to the context. """
-        while 1:
-            # start with an empty string to put the message in
-            msg = b''
-            # block until there is something received
+        # start with an empty string to put the message in
+        msg = b''
+        # block until there is something received
+        msg += ser.read()
+        # block to read until LINEBREAK (can naturally be sent if LR, so read until content_length, see below)
+        while not msg.endswith(LINEBREAK):
             msg += ser.read()
-            # block to read until LINEBREAK (can naturally be sent if LR, so read until content_length, see below)
-            while not msg.endswith(LINEBREAK):
-                msg += ser.read()
 
-            # remove LINEBREAK
-            msg = msg[:-2]
+        # remove LINEBREAK
+        msg = msg[:-2]
 
-            # handle actual messages from outside
-            if msg.startswith(b'LR'):
-                # if message incomplete, read rest
-                msg_arr = msg.split(b',', 3)
-                expected_length = int(msg_arr[2].decode('ascii'), base=16)
-                if len(msg_arr[3]) < expected_length:
-                    # reattach LINEBREAK which apparently was part of message
-                    msg += LINEBREAK
-                    # read remaining bytes of content (minus the LINEBREAK in message)
-                    msg += ser.read(expected_length - (len(msg_arr[3]) + 2))
-                    # remove following LINEBREAK from input
-                    ser.read(2)
-                # handle_incoming_msg(msg)
-                self.msg_in.put(msg)
-                # debug log incoming message
-                self.display_protocol('debug-in', str(msg))
+        # handle actual messages from outside
+        if msg.startswith(b'LR'):
+            # if message incomplete, read rest
+            msg_arr = msg.split(b',', 3)
+            expected_length = int(msg_arr[2].decode('ascii'), base=16)
+            if len(msg_arr[3]) < expected_length:
+                # reattach LINEBREAK which apparently was part of message
+                msg += LINEBREAK
+                # read remaining bytes of content (minus the LINEBREAK in message)
+                msg += ser.read(expected_length - (len(msg_arr[3]) + 2))
+                # remove following LINEBREAK from input
+                ser.read(2)
+            # handle_incoming_msg(msg)
+            self.msg_in.put(msg)
+            # debug log incoming message
+            self.display_protocol('debug-in', str(msg))
 
-            # handle possible errors
-            elif msg.startswith(b'AT,ERR') or msg.startswith(b'ERR'):
-                self.handle_errors(msg)
+        # handle possible errors
+        elif msg.startswith(b'AT,ERR') or msg.startswith(b'ERR'):
+            self.handle_errors(msg)
 
-            # handle answers to commands (put them in a queue). 'Vendor' just to deal properly with AT+RST
-            elif msg.startswith(b'Vendor') or msg.startswith(b'AT'):
-                self.cmd_in.put(msg)
+        # handle answers to commands (put them in a queue). 'Vendor' just to deal properly with AT+RST
+        elif msg.startswith(b'Vendor') or msg.startswith(b'AT'):
+            self.cmd_in.put(msg)
 
-            # log everything else
-            else:
-                self.display_protocol('log-in', f'Ignored message: {msg}')
+        # log everything else
+        else:
+            self.display_protocol('log-in', f'Ignored message: {msg}')
 
     def handle_errors(self, err_msg: bytes):
         if err_msg == b'ERR:CPU_BUSY':
@@ -207,12 +207,6 @@ class LoRaController:
             with self.lock:
                 # display the error
                 self.display_protocol('error', f'Got: "{err_msg.decode("ascii")}". Reset module.')
-                # clear cmd_out, so writing loop will block indefinitely and all old commands are forgotten
-                try:
-                    while 1:
-                        self.cmd_out.get(False)
-                except queue.Empty:
-                    pass
                 # break writing loop out of waiting for an answer
                 self.cmd_in.put(b'break')
                 # reset the module
@@ -237,6 +231,9 @@ class LoRaController:
             of the sender
         :type state: str
         """
+        # if flag to write to gui is not set, don't do that
+        if not self.gui_active:
+            return
 
         result = None
 
@@ -356,6 +353,9 @@ class LoRaController:
         time.sleep(1)
         GPIO.output(18, GPIO.LOW)
         GPIO.cleanup()
+        time.sleep(1)
+        ser.reset_input_buffer()
+        ser.reset_output_buffer()
 
 
 def input_address():
@@ -440,8 +440,17 @@ if __name__ == '__main__':
     for thread in threads:
         thread.start()
 
+    # set flag to activate gui
+    lora_controller.gui_active = False
+
     # catch main thread in GUI-Loop, so program ends when window closes
     win.mainloop()
+
+    # stop logging to avoid Exceptions:
+    lora_controller.gui_active = False
+
+    for thread in threads:
+        thread.stop()
 
     # break all thread-blocks after window closes
     lora_controller.break_queues()

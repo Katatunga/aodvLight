@@ -125,111 +125,110 @@ class Protocol:
             self.buffered_text_requests.remove(text_req)
 
     def protocol_loop(self):
-        while 1:
-            # invalidate expired routes which are still marked as valid
-            self.__invalidate_expired_routes()
-            # delete routes that are marked as invalid and their DELETE_PERIOD expired
-            self.__delete_expired_routes()
+        # invalidate expired routes which are still marked as valid
+        self.__invalidate_expired_routes()
+        # delete routes that are marked as invalid and their DELETE_PERIOD expired
+        self.__delete_expired_routes()
 
-            # do timed tasks and only block until the next task is due (or indefinite if there is no task due)
-            block_for_secs = self.__do_timed_tasks()
-            block_for_secs = max(block_for_secs, 0) if block_for_secs else None
-            try:
-                # get the next message
-                msg_str = self.msg_in.get(timeout=block_for_secs)
-            except queue.Empty:
-                # if there was no massage available in time until next task is due, do due tasks
-                self.to_display('debug-out', 'Exited blocking on queue to do tasks')
-                continue
+        # do timed tasks and only block until the next task is due (or indefinite if there is no task due)
+        block_for_secs = self.__do_timed_tasks()
+        block_for_secs = max(block_for_secs, 0) if block_for_secs else None
+        try:
+            # get the next message
+            msg_str = self.msg_in.get(timeout=block_for_secs)
+        except queue.Empty:
+            # if there was no massage available in time until next task is due, do due tasks
+            self.to_display('debug-out', 'Exited blocking on queue to do tasks')
+            return
 
-            # if there were outside threads registering timed tasks, they will send this command
-            if msg_str == b'do_tasks':
-                self.to_display('debug-out', 'Got command to exit blocking on queue to do tasks')
-                continue
+        # if there were outside threads registering timed tasks, they will send this command
+        if msg_str == b'do_tasks':
+            self.to_display('debug-out', 'Got command to exit blocking on queue to do tasks')
+            return
 
-            # break loop on command
-            if msg_str == b'break':
-                break
+        # break loop on command
+        if msg_str == b'break':
+            return
 
-            # -----------------------
-            # Destructure and confirm integrity of message
-            # -----------------------
+        # -----------------------
+        # Destructure and confirm integrity of message
+        # -----------------------
 
-            # destructure incoming message
-            try:
-                lr: bytes
-                sender: bytes
-                content_length: bytes
-                content: bytes
-                lr, sender, content_length, content = msg_str.split(b',', 3)
-            except ValueError:
-                self.to_display('error', 'Incoming message had too few separators, discarded')
-                continue
+        # destructure incoming message
+        try:
+            lr: bytes
+            sender: bytes
+            content_length: bytes
+            content: bytes
+            lr, sender, content_length, content = msg_str.split(b',', 3)
+        except ValueError:
+            self.to_display('error', 'Incoming message had too few separators, discarded')
+            return
 
-            # make sure it was a message
-            if not lr == b'LR':
-                self.to_display('error', 'Incoming message did not start with "LR", discarded')
-                continue
+        # make sure it was a message
+        if not lr == b'LR':
+            self.to_display('error', 'Incoming message did not start with "LR", discarded')
+            return
 
-            # make sure the message is complete
-            if not int(content_length.decode('ascii'), base=16) == len(content):
-                self.to_display('error', 'Incoming message is incomplete, discarded')
-                continue
+        # make sure the message is complete
+        if not int(content_length.decode('ascii'), base=16) == len(content):
+            self.to_display('error', 'Incoming message is incomplete, discarded')
+            return
 
-            sender: str = sender.decode('ascii')
+        sender: str = sender.decode('ascii')
 
-            if sender not in [('0' * (4 - len(str(i)))) + str(i) for i in range(1, 21)]:
-                self.to_display('error', f'Got message from {sender}, which is not a viable address, discarded.\n'
-                                         f'Message as int: {", ".join(str(Tbyte(x).unsigned()) for x in content)}')
-                continue
+        if sender not in [('0' * (4 - len(str(i)))) + str(i) for i in range(1, 21)]:
+            self.to_display('error', f'Got message from {sender}, which is not a viable address, discarded.\n'
+                                     f'Message as int: {", ".join(str(Tbyte(x).unsigned()) for x in content)}')
+            return
 
-            # -----------------------
-            # evaluate msg_type and hand it to correct method
-            # -----------------------
-            try:
-                msg_type = Tbyte(content[0]).unsigned()
-                # RREQ
-                if msg_type == 1:
-                    self.__handle_rreq(sender, list(content))
+        # -----------------------
+        # evaluate msg_type and hand it to correct method
+        # -----------------------
+        try:
+            msg_type = Tbyte(content[0]).unsigned()
+            # RREQ
+            if msg_type == 1:
+                self.__handle_rreq(sender, list(content))
 
-                # RREP
-                elif msg_type == 2:
-                    self.msg_out(self.construct_rrep_ack(), sender)
-                    self.__handle_rrep(sender, list(content))
+            # RREP
+            elif msg_type == 2:
+                self.msg_out(self.construct_rrep_ack(), sender)
+                self.__handle_rrep(sender, list(content))
 
-                # RERR
-                elif msg_type == 3:
-                    self.__handle_rerr(sender, list(content))
+            # RERR
+            elif msg_type == 3:
+                self.__handle_rerr(sender, list(content))
 
-                # RREP-ACK
-                elif msg_type == 4:
-                    self.to_display('log-in', f'{sender} acknowledged RREP.')
-                    self.waited_for.append((4, sender, Tbyte(0)))
+            # RREP-ACK
+            elif msg_type == 4:
+                self.to_display('log-in', f'{sender} acknowledged RREP.')
+                self.waited_for.append((4, sender, Tbyte(0)))
 
-                # SEND-TEXT-REQUEST
-                elif msg_type == 5:
-                    self.__handle_s_t_r(sender, content)
+            # SEND-TEXT-REQUEST
+            elif msg_type == 5:
+                self.__handle_s_t_r(sender, content)
 
-                # SEND-HOP-ACK
-                elif msg_type == 6:
-                    msg_id = Tbyte(content[1])
-                    self.to_display('log-in', f'{sender} sent SEND-HOP-ACK for message: {msg_id.unsigned()}')
-                    self.waited_for.append((6, sender, msg_id))
+            # SEND-HOP-ACK
+            elif msg_type == 6:
+                msg_id = Tbyte(content[1])
+                self.to_display('log-in', f'{sender} sent SEND-HOP-ACK for message: {msg_id.unsigned()}')
+                self.waited_for.append((6, sender, msg_id))
 
-                # SEND-TEXT-REQUEST-ACK
-                elif msg_type == 7:
-                    self.__handle_s_t_r_ack(list(content))
+            # SEND-TEXT-REQUEST-ACK
+            elif msg_type == 7:
+                self.__handle_s_t_r_ack(list(content))
 
-                # Unknown message type
-                else:
-                    self.to_display('info', f'Malformed message from {sender}: {content}, discarded (Type unknown)')
-            except (ProtocolError, IndexError) as e:
-                self.to_display(
-                    'error',
-                    f'Message from prev_hop {sender} violated the Protocol: {e.message}' +
-                    f'\nmessage as hex: {content.hex()}' +
-                    f'\nmessage as int: {", ".join(str(Tbyte(x).unsigned()) for x in content)}'
-                )
+            # Unknown message type
+            else:
+                self.to_display('info', f'Malformed message from {sender}: {content}, discarded (Type unknown)')
+        except (ProtocolError, IndexError) as e:
+            self.to_display(
+                'error',
+                f'Message from prev_hop {sender} violated the Protocol: {e.message}' +
+                f'\nmessage as hex: {content.hex()}' +
+                f'\nmessage as int: {", ".join(str(Tbyte(x).unsigned()) for x in content)}'
+            )
 
     # ----------------------------------------------------------------------------------------------
     #                                     SEND-TEXT-REQUEST
