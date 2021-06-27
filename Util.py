@@ -4,6 +4,7 @@ import struct
 import sys
 import threading
 import time
+import serial
 from typing import Optional, Union
 
 
@@ -19,8 +20,11 @@ class LoopingThread(threading.Thread):
 
     def run(self):
         print("Starting " + self.name)
-        while not self.stopping:
-            self.loop()
+        try:
+            while not self.stopping:
+                self.loop()
+        except serial.SerialException:
+            print('SerialPort seems to be closed.')
         print("Exiting " + self.name)
         sys.exit()
 
