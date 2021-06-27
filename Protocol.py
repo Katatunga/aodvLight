@@ -282,11 +282,13 @@ class Protocol:
             # Log no active route
             self.to_display(f'log-out', f'No active route to {msg_text_req.dest_addr.address_string()}, sending RERR.')
             # prolong DELETE_PERIOD (AODV: 6.11 2nd to last sentence):
-            if route_to_dest.is_route_valid is False:
+            if route_to_dest and route_to_dest.is_route_valid is False:
                 route_to_dest.expiry_time = time.time() + DELETE_PERIOD
 
             # No active route to dest, send RERR TODO: What to do if dest is next hop?
             dependants = self.__invalidate_route(msg_text_req.dest_addr.address_string(), None)
+            # add the previous node in any case
+            dependants.add(prev_node)
             # if no route is known, set dest_seq_num to 0
             dest_seq_num = route_to_dest.dest_sequence_num if route_to_dest else Tbyte(0)
             self.__send_rerr(dependants, [(msg_text_req.dest_addr, dest_seq_num)])
@@ -889,25 +891,25 @@ class Protocol:
         # if i know a valid route to destination, answer with that route TODO: not implemented by others
         # -----------------------
         route_to_dest = self.routes.get(msg_rreq.dest_addr.address_string())
-        # evaluate whether to send route information about destination (AODV: 6.6.(ii))
-        if route_to_dest \
-                and route_to_dest.is_valid_and_alive() \
-                and route_to_dest.is_dest_seq_valid \
-                and route_to_dest.dest_sequence_num >= msg_rreq.dest_seq_num:
-            # update precursors of forward route (AODV: 6.6.2 (2nd paragraph, 1st sentence))
-            route_to_dest.precursors.add(prev_node)
-            # Update next hop of reverse route entry (AODV: 6.6.2 (2nd paragraph, 2nd sentence)
-            route_to_origin.next_hop = prev_node
+        # # evaluate whether to send route information about destination (AODV: 6.6.(ii))
+        # if route_to_dest \
+        #         and route_to_dest.is_valid_and_alive() \
+        #         and route_to_dest.is_dest_seq_valid \
+        #         and route_to_dest.dest_sequence_num >= msg_rreq.dest_seq_num:
+        #     # update precursors of forward route (AODV: 6.6.2 (2nd paragraph, 1st sentence))
+        #     route_to_dest.precursors.add(prev_node)
+        #     # Update next hop of reverse route entry (AODV: 6.6.2 (2nd paragraph, 2nd sentence)
+        #     route_to_origin.next_hop = prev_node
 
-            inter_rrep = self.construct_rrep(
-                hop_count=route_to_dest.hops,
-                origin_addr=msg_rreq.origin_addr,
-                dest_addr=msg_rreq.dest_addr,
-                dest_seq_num=route_to_dest.dest_sequence_num,
-                lifetime=Tbyte(int(route_to_dest.expiry_time - time.time()))
-            )
-            self.__send_rrep_repeated(inter_rrep, prev_node, RREP_REPEAT)
-            return
+        #     inter_rrep = self.construct_rrep(
+        #         hop_count=route_to_dest.hops,
+        #         origin_addr=msg_rreq.origin_addr,
+        #         dest_addr=msg_rreq.dest_addr,
+        #         dest_seq_num=route_to_dest.dest_sequence_num,
+        #         lifetime=Tbyte(int(route_to_dest.expiry_time - time.time()))
+        #     )
+        #     self.__send_rrep_repeated(inter_rrep, prev_node, RREP_REPEAT)
+        #     return
 
         # -----------
         # FORWARD RREQ

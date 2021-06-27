@@ -455,9 +455,9 @@ if __name__ == '__main__':
     # break all thread-blocks after window closes
     lora_controller.break_queues()
 
+    # close uart
+    ser.close()
+
     for thread in threads:
         if thread.isAlive():
             thread.join()
-
-    # close uart
-    ser.close()
