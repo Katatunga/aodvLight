@@ -224,8 +224,8 @@ class LoRaController:
         :type cmd: str
         :param msg: message to display or display_id of lost message
         :type msg: str
-        :param address: optional parameter that has to be given when cmd is 'msg' or 'msg-state' and contains the address
-            of the sender
+        :param address: optional parameter that has to be given when cmd is 'msg' or 'msg-state' and contains the
+            address of the sender, which needs to be decimal and in range from 1 to 20 (inclusive)
         :type address: str
         :param state: optional parameter that has to be given when cmd is 'msg-state' and contains the address
             of the sender
@@ -243,6 +243,9 @@ class LoRaController:
                     msg = msg.decode('ascii')
                 else:
                     raise ValueError('Message is non ascii, will not be displayed')
+
+            if address and int(address) not in range(1, 21):
+                win.write_error(f'Got information concerning an address {address}, which is not in valid range.')
 
             if cmd == 'msg-state':
                 # update the state of the message as LOST

@@ -116,7 +116,6 @@ class LoRaUI:
     #                     Functionality
     # -------------------------------------------------------------
 
-
     def update_messages(self, *args):
         """
         Updates text in "messages' according to the currently chosen option in self.dd_option
@@ -135,9 +134,10 @@ class LoRaUI:
         """
         Writes message to chat of 'address', aligned left if 'is_out' is True, otherwise aligned right.
         Then calls self.update_messages() to update the currently displayed text.\n
-        :return: The index of this message as an int. This can be used to reference the message in the future.\n
+        :return: The index of this message as an int. This can be used to reference the message in the future.
+        If 'address' can't be translated to an int between 1 and 20 (inclusive) -1 will be returned.\n
         """
-        sender_str = 'From ' + address + ':' if not is_out else 'I wrote:'
+        sender_str = f'From {address}:' if not is_out else 'I wrote:'
 
         int_address = 0 if address == 'FFFF' else int(address)
 
@@ -148,8 +148,10 @@ class LoRaUI:
             msg + \
             '\n' + SEPERATOR + '\n'
 
-        index = len(self.chats[int_address])
-        self.chats[int_address].append((s, align))
+        index = -1
+        if int_address in range(1, 21):
+            index = len(self.chats[int_address])
+            self.chats[int_address].append((s, align))
         # there are no in_msgs from FFFF, but that chat should be used to display all incoming messages
         if not is_out:
             self.chats[0].append((s, align))

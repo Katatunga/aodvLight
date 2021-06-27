@@ -866,7 +866,8 @@ class Protocol:
                 lifetime=time.time() + DEFAULT_LIFETIME
             )
 
-        route_to_origin = self.routes.get(msg_rreq.origin_addr.address_string())
+        # Not used anymore, see RREP if i know destination
+        # route_to_origin = self.routes.get(msg_rreq.origin_addr.address_string())
 
         # -----------------------
         # SEND RREP
