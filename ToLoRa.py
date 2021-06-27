@@ -456,6 +456,8 @@ if __name__ == '__main__':
     lora_controller.break_queues()
 
     # close uart
+    ser.cancel_read()  # should not throw an error according to docs, but does (TypeError)
+    ser.cancel_write()
     ser.close()
 
     for thread in threads:
